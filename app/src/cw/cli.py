@@ -145,6 +145,8 @@ def main() -> None:
     stream_sim_parser.add_argument("--input-block-ms", type=float, default=10.0)
     stream_sim_parser.add_argument("--frame-ms", type=float, default=30.0)
     stream_sim_parser.add_argument("--hop-ms", type=float, default=5.0)
+    stream_sim_parser.add_argument("--tracker-frame-ms", type=float, default=None)
+    stream_sim_parser.add_argument("--tracker-hop-ms", type=float, default=None)
     stream_sim_parser.add_argument("--min-tone-hz", type=float, default=200.0)
     stream_sim_parser.add_argument("--max-tone-hz", type=float, default=2000.0)
     stream_sim_parser.add_argument("--bandwidth-hz", type=float, default=40.0)
@@ -161,6 +163,10 @@ def main() -> None:
     stream_sim_parser.add_argument("--min-track-hits", type=int, default=2)
     stream_sim_parser.add_argument("--emit-interval-s", type=float, default=0.50)
     stream_sim_parser.add_argument("--min-update-score", type=float, default=25.0)
+    stream_sim_parser.add_argument("--max-final-score", type=float, default=30.0)
+    stream_sim_parser.add_argument("--disable-final-quality-filter", action="store_true")
+    stream_sim_parser.add_argument("--shadow-suppression-hz", type=float, default=None)
+    stream_sim_parser.add_argument("--shadow-score-margin", type=float, default=15.0)
     stream_sim_parser.add_argument("--session-gap-units", type=float, default=20.0)
     stream_sim_parser.add_argument("--min-session-gap-s", type=float, default=1.20)
     stream_sim_parser.add_argument("--history-margin-s", type=float, default=0.25)
@@ -188,12 +194,18 @@ def main() -> None:
     spacing_parser.add_argument("--seed", type=int, default=123)
     spacing_parser.add_argument("--normalize-peak", type=float, default=0.95)
     spacing_parser.add_argument("--mix-noise-snr-db", type=float, default=None)
-    spacing_parser.add_argument("--stream-frame-ms", type=float, default=80.0)
-    spacing_parser.add_argument("--stream-hop-ms", type=float, default=10.0)
+    spacing_parser.add_argument("--stream-frame-ms", type=float, default=30.0)
+    spacing_parser.add_argument("--stream-hop-ms", type=float, default=5.0)
+    spacing_parser.add_argument("--tracker-frame-ms", type=float, default=80.0)
+    spacing_parser.add_argument("--tracker-hop-ms", type=float, default=10.0)
     spacing_parser.add_argument("--stream-bandwidth-hz", type=float, default=40.0)
     spacing_parser.add_argument("--stream-threshold-ratio", type=float, default=0.35)
     spacing_parser.add_argument("--peak-relative-threshold", type=float, default=0.25)
     spacing_parser.add_argument("--track-relative-threshold", type=float, default=0.10)
+    spacing_parser.add_argument("--max-final-score", type=float, default=30.0)
+    spacing_parser.add_argument("--disable-final-quality-filter", action="store_true")
+    spacing_parser.add_argument("--shadow-suppression-hz", type=float, default=None)
+    spacing_parser.add_argument("--shadow-score-margin", type=float, default=15.0)
     spacing_parser.add_argument("--min-separation-hz", type=float, default=80.0)
     spacing_parser.add_argument("--peak-min-separation-hz", type=float, default=None)
     spacing_parser.add_argument("--track-match-hz", type=float, default=None)
@@ -583,10 +595,15 @@ def main() -> None:
             mix_noise_snr_db=args.mix_noise_snr_db,
             stream_frame_ms=args.stream_frame_ms,
             stream_hop_ms=args.stream_hop_ms,
+            tracker_frame_ms=args.tracker_frame_ms,
+            tracker_hop_ms=args.tracker_hop_ms,
             stream_bandwidth_hz=args.stream_bandwidth_hz,
             stream_threshold_ratio=args.stream_threshold_ratio,
             peak_relative_threshold=args.peak_relative_threshold,
             track_relative_threshold=args.track_relative_threshold,
+            max_final_score=None if args.disable_final_quality_filter else args.max_final_score,
+            shadow_suppression_hz=args.shadow_suppression_hz,
+            shadow_score_margin=args.shadow_score_margin,
             min_separation_hz=args.min_separation_hz,
             peak_min_separation_hz=args.peak_min_separation_hz,
             track_match_hz=args.track_match_hz,
@@ -625,6 +642,7 @@ def main() -> None:
         print(f"duration_s={result.duration_s:.3f}")
         print(
             f"frames_processed={result.frames_processed} "
+            f"tracker_frames_processed={result.tracker_frames_processed} "
             f"retained_frames={result.retained_frames} "
             f"pruned_frames={result.pruned_frames}"
         )
@@ -739,6 +757,8 @@ def _streaming_config(args: argparse.Namespace):
         input_block_ms=args.input_block_ms,
         frame_ms=args.frame_ms,
         hop_ms=args.hop_ms,
+        tracker_frame_ms=args.tracker_frame_ms,
+        tracker_hop_ms=args.tracker_hop_ms,
         min_tone_hz=args.min_tone_hz,
         max_tone_hz=args.max_tone_hz,
         bandwidth_hz=args.bandwidth_hz,
@@ -756,6 +776,9 @@ def _streaming_config(args: argparse.Namespace):
         emit_interval_s=args.emit_interval_s,
         stable_updates=not args.raw_updates,
         min_update_score=args.min_update_score,
+        max_final_score=None if args.disable_final_quality_filter else args.max_final_score,
+        shadow_suppression_hz=args.shadow_suppression_hz,
+        shadow_score_margin=args.shadow_score_margin,
         session_gap_units=args.session_gap_units,
         min_session_gap_s=args.min_session_gap_s,
         prune_finalized_sessions=not args.no_prune_finalized_sessions,

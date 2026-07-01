@@ -73,6 +73,10 @@ def test_spacing_streaming_config_exposes_split_tracker_thresholds():
     from cw.spacing_benchmark import _streaming_config
 
     config = SpacingBenchmarkConfig(
+        stream_frame_ms=20.0,
+        stream_hop_ms=5.0,
+        tracker_frame_ms=90.0,
+        tracker_hop_ms=15.0,
         peak_min_separation_hz=40.0,
         track_match_hz=50.0,
         channel_merge_hz=90.0,
@@ -80,6 +84,10 @@ def test_spacing_streaming_config_exposes_split_tracker_thresholds():
 
     stream_config = _streaming_config(config)
 
+    assert stream_config.frame_ms == 20.0
+    assert stream_config.hop_ms == 5.0
+    assert stream_config.tracker_frame_ms == 90.0
+    assert stream_config.tracker_hop_ms == 15.0
     assert stream_config.peak_min_separation_hz == 40.0
     assert stream_config.track_match_hz == 50.0
     assert stream_config.channel_merge_hz == 90.0

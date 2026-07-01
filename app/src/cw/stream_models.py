@@ -13,6 +13,8 @@ class StreamingConfig:
     input_block_ms: float = 10.0
     frame_ms: float = 30.0
     hop_ms: float = 5.0
+    tracker_frame_ms: float | None = None
+    tracker_hop_ms: float | None = None
     min_tone_hz: float = 200.0
     max_tone_hz: float = 2000.0
     bandwidth_hz: float = 40.0
@@ -30,6 +32,9 @@ class StreamingConfig:
     emit_interval_s: float = 0.50
     stable_updates: bool = True
     min_update_score: float = 25.0
+    max_final_score: float | None = 30.0
+    shadow_suppression_hz: float | None = None
+    shadow_score_margin: float = 15.0
     session_gap_units: float = 20.0
     min_session_gap_s: float = 1.20
     final_event_reason: str = "end_of_stream"
@@ -90,6 +95,7 @@ class StreamSimulationResult:
     tracks: list[StreamTrackResult]
     events: list[StreamEvent]
     frames_processed: int = 0
+    tracker_frames_processed: int = 0
     retained_frames: int = 0
     pruned_frames: int = 0
 
@@ -99,6 +105,14 @@ class SpectrumFrame:
     start_s: float
     spectrum: np.ndarray
     freqs: np.ndarray
+
+
+def effective_tracker_frame_ms(config: StreamingConfig) -> float:
+    return config.tracker_frame_ms if config.tracker_frame_ms is not None else config.frame_ms
+
+
+def effective_tracker_hop_ms(config: StreamingConfig) -> float:
+    return config.tracker_hop_ms if config.tracker_hop_ms is not None else config.hop_ms
 
 
 def peak_min_separation_hz(config: StreamingConfig) -> float:
@@ -124,6 +138,10 @@ def validate_streaming_config(config: StreamingConfig) -> None:
         raise ValueError("frame_ms must be positive")
     if config.hop_ms <= 0:
         raise ValueError("hop_ms must be positive")
+    if config.tracker_frame_ms is not None and config.tracker_frame_ms <= 0:
+        raise ValueError("tracker_frame_ms must be positive when set")
+    if config.tracker_hop_ms is not None and config.tracker_hop_ms <= 0:
+        raise ValueError("tracker_hop_ms must be positive when set")
     if config.min_tone_hz >= config.max_tone_hz:
         raise ValueError("min_tone_hz must be lower than max_tone_hz")
     if config.bandwidth_hz <= 0:
@@ -152,6 +170,12 @@ def validate_streaming_config(config: StreamingConfig) -> None:
         raise ValueError("emit_interval_s must be positive")
     if config.min_update_score <= 0:
         raise ValueError("min_update_score must be positive")
+    if config.max_final_score is not None and config.max_final_score <= 0:
+        raise ValueError("max_final_score must be positive when set")
+    if config.shadow_suppression_hz is not None and config.shadow_suppression_hz < 0:
+        raise ValueError("shadow_suppression_hz must not be negative when set")
+    if config.shadow_score_margin < 0:
+        raise ValueError("shadow_score_margin must not be negative")
     if config.session_gap_units <= 0:
         raise ValueError("session_gap_units must be positive")
     if config.min_session_gap_s <= 0:

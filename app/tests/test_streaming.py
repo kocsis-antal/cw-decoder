@@ -145,3 +145,29 @@ def test_stream_sim_splits_same_channel_into_sessions_after_long_silence(tmp_pat
     final_events = [event for event in result.events if event.kind == "SESSION_FINAL"]
     assert [event.session_id for event in final_events] == [1, 2]
     assert [event.text for event in final_events] == ["CQ", "DE"]
+
+
+def test_stream_sim_can_use_longer_tracker_fft_than_decode_fft(tmp_path: Path) -> None:
+    wav_path = tmp_path / "two.wav"
+    sources = [
+        parse_source_spec("id=one;freq=700;preset=straight;text=CQ DE YU7NKA", index=0, sample_rate=8000),
+        parse_source_spec("id=two;freq=820;preset=straight;text=CQ DE YT7MK;start=0.2;amplitude=0.45", index=1, sample_rate=8000),
+    ]
+    write_multi_sample(sources, wav_path, sample_rate=8000)
+
+    result = simulate_stream_from_wav(
+        wav_path,
+        StreamingConfig(
+            frame_ms=20,
+            hop_ms=5,
+            tracker_frame_ms=80,
+            tracker_hop_ms=10,
+            max_tracks=3,
+            emit_interval_s=0.5,
+        ),
+    )
+
+    texts = {track.decoded.text for track in result.tracks}
+    assert "CQ DE YU7NKA" in texts
+    assert "CQ DE YT7MK" in texts
+    assert result.frames_processed > result.tracker_frames_processed > 0

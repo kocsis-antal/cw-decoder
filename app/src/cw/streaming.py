@@ -12,11 +12,14 @@ from cw.decoder import (
     read_wav_mono,
 )
 from cw.stream_decode import decode_carrier_sessions_from_frames, detect_accumulated_carriers
+from cw.stream_filter import filter_final_tracks
 from cw.stream_state import ChannelRegistry, ChannelState
 from cw.stream_models import (
     SpectrumFrame,
     StreamEvent,
     StreamingConfig,
+    effective_tracker_frame_ms,
+    effective_tracker_hop_ms,
     StreamSessionResult,
     StreamSimulationResult,
     StreamTrackResult,
@@ -53,7 +56,12 @@ def simulate_stream(signal: np.ndarray, sample_rate: int, config: StreamingConfi
     validate_streaming_config(config)
     signal = _to_mono_float(signal)
 
-    stft = StreamingSTFT(sample_rate, config.frame_ms, config.hop_ms)
+    decode_stft = StreamingSTFT(sample_rate, config.frame_ms, config.hop_ms)
+    tracker_stft = StreamingSTFT(
+        sample_rate,
+        effective_tracker_frame_ms(config),
+        effective_tracker_hop_ms(config),
+    )
     registry = ChannelRegistry(config)
     tracker = CarrierTracker(config)
     frames: list[SpectrumFrame] = []
@@ -61,15 +69,26 @@ def simulate_stream(signal: np.ndarray, sample_rate: int, config: StreamingConfi
     events: list[StreamEvent] = []
     last_emit_s = 0.0
     frames_processed = 0
+    tracker_frames_processed = 0
     pruned_frames = 0
 
     block_length = max(1, round(sample_rate * config.input_block_ms / 1000))
     for start in range(0, len(signal), block_length):
         block = signal[start : start + block_length]
-        for frame in stft.push(block):
+        decode_frames = [("decode", frame) for frame in decode_stft.push(block)]
+        tracker_frames = [("track", frame) for frame in tracker_stft.push(block)]
+        frame_events = sorted(
+            [*decode_frames, *tracker_frames],
+            key=lambda item: (item[1].start_s, 0 if item[0] == "track" else 1),
+        )
+        for kind, frame in frame_events:
+            if kind == "track":
+                tracker.update(frame)
+                tracker_frames_processed += 1
+                continue
+
             frames.append(frame)
             frames_processed += 1
-            tracker.update(frame)
             if frame.start_s - last_emit_s < config.emit_interval_s:
                 continue
             last_emit_s = frame.start_s
@@ -103,6 +122,7 @@ def simulate_stream(signal: np.ndarray, sample_rate: int, config: StreamingConfi
         tracks=tracks,
         events=events,
         frames_processed=frames_processed,
+        tracker_frames_processed=tracker_frames_processed,
         retained_frames=len(frames),
         pruned_frames=pruned_frames,
     )
@@ -223,7 +243,7 @@ def _final_tracks_from_frames(
             )
         )
     results.sort(key=lambda result: (result.track_id, result.quality.score))
-    return results
+    return filter_final_tracks(results, config)
 
 
 def _merge_final_carriers(

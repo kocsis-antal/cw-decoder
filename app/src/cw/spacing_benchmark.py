@@ -27,12 +27,17 @@ class SpacingBenchmarkConfig:
     normalize_peak: float | None = 0.95
     mix_noise_snr_db: float | None = None
     stream_input_block_ms: float = 10.0
-    stream_frame_ms: float = 80.0
-    stream_hop_ms: float = 10.0
+    stream_frame_ms: float = 30.0
+    stream_hop_ms: float = 5.0
+    tracker_frame_ms: float | None = 80.0
+    tracker_hop_ms: float | None = 10.0
     stream_bandwidth_hz: float = 40.0
     stream_threshold_ratio: float = 0.35
     peak_relative_threshold: float = 0.25
     track_relative_threshold: float = 0.10
+    max_final_score: float | None = 30.0
+    shadow_suppression_hz: float | None = None
+    shadow_score_margin: float = 15.0
     min_separation_hz: float = 80.0
     peak_min_separation_hz: float | None = None
     track_match_hz: float | None = None
@@ -186,10 +191,15 @@ def _streaming_config(config: SpacingBenchmarkConfig) -> StreamingConfig:
         input_block_ms=config.stream_input_block_ms,
         frame_ms=config.stream_frame_ms,
         hop_ms=config.stream_hop_ms,
+        tracker_frame_ms=config.tracker_frame_ms,
+        tracker_hop_ms=config.tracker_hop_ms,
         bandwidth_hz=config.stream_bandwidth_hz,
         threshold_ratio=config.stream_threshold_ratio,
         peak_relative_threshold=config.peak_relative_threshold,
         track_relative_threshold=config.track_relative_threshold,
+        max_final_score=config.max_final_score,
+        shadow_suppression_hz=config.shadow_suppression_hz,
+        shadow_score_margin=config.shadow_score_margin,
         min_separation_hz=config.min_separation_hz,
         peak_min_separation_hz=config.peak_min_separation_hz,
         track_match_hz=config.track_match_hz,
@@ -224,12 +234,22 @@ def _validate_spacing_config(config: SpacingBenchmarkConfig) -> None:
         raise ValueError("merge_below_hz and split_from_hz must be positive")
     if config.merge_below_hz > config.split_from_hz:
         raise ValueError("merge_below_hz must not be higher than split_from_hz")
+    if config.max_final_score is not None and config.max_final_score <= 0:
+        raise ValueError("max_final_score must be positive when set")
+    if config.shadow_suppression_hz is not None and config.shadow_suppression_hz < 0:
+        raise ValueError("shadow_suppression_hz must not be negative when set")
+    if config.shadow_score_margin < 0:
+        raise ValueError("shadow_score_margin must not be negative")
     if config.peak_min_separation_hz is not None and config.peak_min_separation_hz <= 0:
         raise ValueError("peak_min_separation_hz must be positive when set")
     if config.track_match_hz is not None and config.track_match_hz <= 0:
         raise ValueError("track_match_hz must be positive when set")
     if config.channel_merge_hz is not None and config.channel_merge_hz <= 0:
         raise ValueError("channel_merge_hz must be positive when set")
+    if config.tracker_frame_ms is not None and config.tracker_frame_ms <= 0:
+        raise ValueError("tracker_frame_ms must be positive when set")
+    if config.tracker_hop_ms is not None and config.tracker_hop_ms <= 0:
+        raise ValueError("tracker_hop_ms must be positive when set")
     if config.sample_rate <= 0:
         raise ValueError("sample_rate must be positive")
     if config.source_a_amplitude <= 0 or config.source_b_amplitude <= 0:

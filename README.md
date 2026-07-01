@@ -174,27 +174,32 @@ Default expectations are intentionally conservative:
 100 Hz and up  should split and decode both sources
 ```
 
-The benchmark uses a longer stream FFT frame by default (`--stream-frame-ms 80`)
-because carrier spacing needs better frequency resolution than fast Morse edge
-timing. The normal `stream-sim` defaults remain more time-resolution oriented.
-Useful knobs are `--deltas`, `--merge-below-hz`, `--split-from-hz`,
-`--stream-frame-ms`, and `--stream-hop-ms`. Tracker spacing can now be tuned
-with separate thresholds: `--peak-min-separation-hz` controls how close two FFT
-peaks may be before one suppresses the other, `--track-match-hz` controls how far
-a peak may move frame-to-frame and still match an existing carrier track, and
-`--channel-merge-hz` controls how close final carrier candidates may be before
-they are treated as the same channel. `--min-separation-hz` remains the legacy
-default used when these more specific values are omitted.
+The benchmark now uses two STFT paths by default: a shorter decode STFT
+(`--stream-frame-ms 30`, `--stream-hop-ms 5`) for Morse timing, and a longer
+tracker STFT (`--tracker-frame-ms 80`, `--tracker-hop-ms 10`) for carrier
+spacing. This keeps the frequency resolution needed for close carriers without
+forcing the Morse edge detector to use the same long frame. Useful knobs are
+`--deltas`, `--merge-below-hz`, `--split-from-hz`, `--stream-frame-ms`,
+`--stream-hop-ms`, `--tracker-frame-ms`, and `--tracker-hop-ms`. Tracker spacing
+can also be tuned with separate thresholds: `--peak-min-separation-hz` controls
+how close two FFT peaks may be before one suppresses the other, `--track-match-hz`
+controls how far a peak may move frame-to-frame and still match an existing
+carrier track, and `--channel-merge-hz` controls how close final carrier
+candidates may be before they are treated as the same channel.
+`--min-separation-hz` remains the legacy default used when these more specific
+values are omitted.
 
 ## Streaming simulation
 
 `stream-sim` does not split the WAV into separate files. It reads the audio as a
 continuous sample stream, feeds it into an internal ring-buffer-like STFT, and
-produces overlapping FFT frames. Carrier detection is now frame-by-frame: each overlapping FFT frame yields
-spectral peaks, a lightweight tracker links those peaks into smoothed carrier
-tracks, and each active carrier track drives its own channel/session decode. The
-retained frame history is still used to decode the current session, which keeps
-the WAV replay deterministic while moving the internals toward microphone input.
+produces overlapping FFT frames. Carrier detection is now frame-by-frame and can use a separate, longer FFT path
+from the Morse decoder: each tracker FFT frame yields spectral peaks, a
+lightweight tracker links those peaks into smoothed carrier tracks, and each
+active carrier track drives its own channel/session decode using the shorter
+decode frames. The retained decode-frame history is still used to decode the
+current session, which keeps the WAV replay deterministic while moving the
+internals toward microphone input.
 
 ```bash
 docker compose -f infra/compose.yml run --rm cw python -m cw.cli stream-sim samples/generated/two_sources.wav
