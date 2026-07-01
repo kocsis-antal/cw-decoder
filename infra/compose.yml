@@ -1,0 +1,13 @@
+services:
+  cw:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cw-morse-dev:local
+    working_dir: /app
+    environment:
+      PYTHONPATH: /app/src
+    volumes:
+      - ../app:/app
+    stdin_open: true
+    tty: true

@@ -1,0 +1,508 @@
+import argparse
+import sys
+from pathlib import Path
+
+from cw.morse_table import decode_tokens, encode_text
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="cw")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    encode_parser = subparsers.add_parser("encode")
+    encode_parser.add_argument("text")
+
+    decode_parser = subparsers.add_parser("decode-tokens")
+    decode_parser.add_argument("tokens", nargs="+")
+
+    decode_wav_parser = subparsers.add_parser("decode-wav")
+    decode_wav_parser.add_argument("path", type=Path)
+    _add_decoder_options(decode_wav_parser)
+
+    inspect_parser = subparsers.add_parser("inspect")
+    inspect_parser.add_argument("path", type=Path)
+    _add_decoder_options(inspect_parser)
+
+    evaluate_parser = subparsers.add_parser("evaluate")
+    evaluate_parser.add_argument("wav_path", type=Path)
+    evaluate_parser.add_argument("labels_path", type=Path)
+    _add_decoder_options(evaluate_parser)
+
+    contest_parser = subparsers.add_parser("contest")
+    contest_parser.add_argument("wav_path", type=Path)
+    contest_parser.add_argument("labels_path", type=Path)
+    contest_parser.add_argument("--frame-ms", default="10,20,30")
+    contest_parser.add_argument("--hop-ms", default="5,10")
+    contest_parser.add_argument("--bandwidth-hz", default="20,40,80")
+    contest_parser.add_argument("--threshold-ratio", default="0.25,0.35,0.45")
+    contest_parser.add_argument("--min-tone-hz", type=float, default=200.0)
+    contest_parser.add_argument("--max-tone-hz", type=float, default=2000.0)
+    contest_parser.add_argument("--top", type=int, default=10)
+
+    contest_live_parser = subparsers.add_parser("contest-live")
+    contest_live_parser.add_argument("wav_path", type=Path)
+    contest_live_parser.add_argument("--frame-ms", default="10,20,30")
+    contest_live_parser.add_argument("--hop-ms", default="5,10")
+    contest_live_parser.add_argument("--bandwidth-hz", default="20,40,80")
+    contest_live_parser.add_argument("--threshold-ratio", default="0.25,0.35,0.45")
+    contest_live_parser.add_argument("--min-tone-hz", type=float, default=200.0)
+    contest_live_parser.add_argument("--max-tone-hz", type=float, default=2000.0)
+    contest_live_parser.add_argument("--top", type=int, default=10)
+    contest_live_parser.add_argument("--consensus-top", type=int, default=5)
+
+    benchmark_parser = subparsers.add_parser("benchmark")
+    benchmark_parser.add_argument("text")
+    benchmark_parser.add_argument("--out-dir", type=Path, default=Path("samples/benchmark"))
+    benchmark_parser.add_argument("--presets", default="clean,jitter,drift,noise,straight,field,hard,ugly,brutal")
+    benchmark_parser.add_argument("--seeds", default="123,999")
+    benchmark_parser.add_argument("--frame-ms", default="10,20,30")
+    benchmark_parser.add_argument("--hop-ms", default="5,10")
+    benchmark_parser.add_argument("--bandwidth-hz", default="20,40,80")
+    benchmark_parser.add_argument("--threshold-ratio", default="0.25,0.35,0.45")
+    benchmark_parser.add_argument("--min-tone-hz", type=float, default=200.0)
+    benchmark_parser.add_argument("--max-tone-hz", type=float, default=2000.0)
+    benchmark_parser.add_argument("--expect", action="store_true")
+    benchmark_parser.add_argument("--expected-pass-presets", default="clean,jitter,drift,noise,straight,field,hard,ugly")
+    benchmark_parser.add_argument("--allowed-fail-presets", default="brutal")
+
+    generate_parser = subparsers.add_parser("generate")
+    generate_parser.add_argument("text")
+    generate_parser.add_argument("--out", type=Path, required=True)
+    generate_parser.add_argument(
+        "--preset",
+        choices=["clean", "jitter", "drift", "noise", "straight", "field", "hard", "ugly", "brutal"],
+        default="clean",
+    )
+    generate_parser.add_argument("--sample-rate", type=int, default=None)
+    generate_parser.add_argument("--tone-hz", type=float, default=None)
+    generate_parser.add_argument("--wpm", type=float, default=None)
+    generate_parser.add_argument("--amplitude", type=float, default=None)
+    generate_parser.add_argument("--timing-jitter", type=float, default=None)
+    generate_parser.add_argument("--dot-jitter", type=float, default=None)
+    generate_parser.add_argument("--dash-jitter", type=float, default=None)
+    generate_parser.add_argument("--element-gap-jitter", type=float, default=None)
+    generate_parser.add_argument("--letter-gap-jitter", type=float, default=None)
+    generate_parser.add_argument("--word-gap-jitter", type=float, default=None)
+    generate_parser.add_argument("--dash-ratio", type=float, default=None)
+    generate_parser.add_argument("--speed-wobble", type=float, default=None)
+    generate_parser.add_argument("--speed-wobble-hz", type=float, default=None)
+    generate_parser.add_argument("--frequency-drift-hz", type=float, default=None)
+    generate_parser.add_argument("--frequency-wobble-hz", type=float, default=None)
+    generate_parser.add_argument("--frequency-wobble-rate-hz", type=float, default=None)
+    generate_parser.add_argument("--amplitude-fade", type=float, default=None)
+    generate_parser.add_argument("--amplitude-fade-hz", type=float, default=None)
+    generate_parser.add_argument("--noise-snr-db", type=float, default=None)
+    generate_parser.add_argument("--seed", type=int, default=None)
+
+    generate_multi_parser = subparsers.add_parser("generate-multi")
+    generate_multi_parser.add_argument("--out", type=Path, required=True)
+    generate_multi_parser.add_argument(
+        "--source",
+        action="append",
+        required=True,
+        help="Semicolon separated source spec, e.g. id=me;freq=700;preset=field;text=CQ CQ DE YU7NKA",
+    )
+    generate_multi_parser.add_argument("--sample-rate", type=int, default=8000)
+    generate_multi_parser.add_argument("--seed", type=int, default=None)
+    generate_multi_parser.add_argument("--normalize-peak", type=float, default=0.95)
+    generate_multi_parser.add_argument("--mix-noise-snr-db", type=float, default=None)
+
+    detect_carriers_parser = subparsers.add_parser("detect-carriers")
+    detect_carriers_parser.add_argument("wav_path", type=Path)
+    _add_carrier_detection_options(detect_carriers_parser)
+
+    contest_live_multi_parser = subparsers.add_parser("contest-live-multi")
+    contest_live_multi_parser.add_argument("wav_path", type=Path)
+    contest_live_multi_parser.add_argument("--frame-ms", default="10,20,30")
+    contest_live_multi_parser.add_argument("--hop-ms", default="5,10")
+    contest_live_multi_parser.add_argument("--bandwidth-hz", default="20,40,80")
+    contest_live_multi_parser.add_argument("--threshold-ratio", default="0.25,0.35,0.45")
+    contest_live_multi_parser.add_argument("--top", type=int, default=5)
+    contest_live_multi_parser.add_argument("--consensus-top", type=int, default=3)
+    _add_carrier_detection_options(contest_live_multi_parser)
+
+    args = parser.parse_args()
+
+    if args.command == "encode":
+        print(" ".join(encode_text(args.text)))
+    elif args.command == "decode-tokens":
+        print(decode_tokens(args.tokens))
+    elif args.command == "decode-wav":
+        from cw.decoder import decode_wav
+
+        result = decode_wav(args.path, _decoder_config(args))
+        print(result.text)
+        print(f"carrier_hz={result.carrier_hz:.1f}")
+        print(f"unit_s={result.unit_s:.3f}")
+        print(f"tokens={' '.join(result.tokens)}")
+    elif args.command == "inspect":
+        from cw.decoder import decode_wav
+
+        result = decode_wav(args.path, _decoder_config(args))
+        print(f"text={result.text}")
+        print(f"carrier_hz={result.carrier_hz:.1f}")
+        print(f"threshold={result.threshold:.6f}")
+        print(f"unit_s={result.unit_s:.3f}")
+        print(f"tokens={' '.join(result.tokens)}")
+        print("runs:")
+        for run in result.classified_runs:
+            print(
+                f"  {run.kind:<4} "
+                f"start={run.start_s:7.3f}s "
+                f"duration={run.duration_s:7.3f}s "
+                f"units={run.units:5.2f} "
+                f"symbol={run.symbol}"
+            )
+    elif args.command == "evaluate":
+        from cw.evaluation import evaluate_wav
+
+        result = evaluate_wav(args.wav_path, args.labels_path, _decoder_config(args))
+        print(f"expected_text={result.expected_text}")
+        print(f"decoded_text={result.decoded_text}")
+        print(f"text_ok={result.text_ok}")
+        print(f"token_accuracy={result.token_accuracy:.1%}")
+        print(f"expected_carrier_hz={result.expected_carrier_hz:.1f}")
+        print(f"detected_carrier_hz={result.detected_carrier_hz:.1f}")
+        print(f"carrier_error_hz={result.carrier_error_hz:+.1f}")
+        print(f"expected_unit_s={result.expected_unit_s:.3f}")
+        print(f"detected_unit_s={result.detected_unit_s:.3f}")
+        print(f"unit_error_ms={result.unit_error_ms:+.1f}")
+        print(f"events_compared={result.timing.compared_count}")
+        print(f"event_count_delta={result.timing.count_delta:+d}")
+        print(f"event_symbol_accuracy={result.timing.symbol_accuracy:.1%}")
+        print(f"avg_start_error_ms={result.timing.avg_start_error_ms:.1f}")
+        print(f"max_start_error_ms={result.timing.max_start_error_ms:.1f}")
+        print(f"avg_duration_error_ms={result.timing.avg_duration_error_ms:.1f}")
+        print(f"max_duration_error_ms={result.timing.max_duration_error_ms:.1f}")
+    elif args.command == "contest":
+        from cw.contest import ContestGrid, parse_float_list, run_contest
+
+        grid = ContestGrid(
+            frame_ms=parse_float_list(args.frame_ms),
+            hop_ms=parse_float_list(args.hop_ms),
+            bandwidth_hz=parse_float_list(args.bandwidth_hz),
+            threshold_ratio=parse_float_list(args.threshold_ratio),
+        )
+        results = run_contest(
+            args.wav_path,
+            args.labels_path,
+            grid,
+            min_tone_hz=args.min_tone_hz,
+            max_tone_hz=args.max_tone_hz,
+        )
+        print(f"tested={len(results)}")
+        print("rank score text_ok token_acc symbol_acc frame hop bandwidth threshold unit_err_ms avg_start_ms avg_duration_ms text")
+        for result in results[: args.top]:
+            evaluation = result.evaluation
+            config = result.config
+            print(
+                f"{result.rank:>4} "
+                f"{result.score:>7.1f} "
+                f"{str(evaluation.text_ok):>7} "
+                f"{evaluation.token_accuracy:>9.1%} "
+                f"{evaluation.timing.symbol_accuracy:>10.1%} "
+                f"{config.frame_ms:>5.1f} "
+                f"{config.hop_ms:>3.1f} "
+                f"{config.bandwidth_hz:>9.1f} "
+                f"{config.threshold_ratio:>9.2f} "
+                f"{evaluation.unit_error_ms:>11.1f} "
+                f"{evaluation.timing.avg_start_error_ms:>12.1f} "
+                f"{evaluation.timing.avg_duration_error_ms:>15.1f} "
+                f"{evaluation.decoded_text}"
+            )
+    elif args.command == "contest-live":
+        from cw.contest import ContestGrid, parse_float_list, run_live_contest, summarize_live_consensus
+
+        grid = ContestGrid(
+            frame_ms=parse_float_list(args.frame_ms),
+            hop_ms=parse_float_list(args.hop_ms),
+            bandwidth_hz=parse_float_list(args.bandwidth_hz),
+            threshold_ratio=parse_float_list(args.threshold_ratio),
+        )
+        results = run_live_contest(
+            args.wav_path,
+            grid,
+            min_tone_hz=args.min_tone_hz,
+            max_tone_hz=args.max_tone_hz,
+        )
+        print(f"tested={len(results)}")
+        print("rank score unknown tokens dots dashes ratio_err gap_err unit_cv frame hop bandwidth threshold carrier unit text")
+        for result in results[: args.top]:
+            quality = result.quality
+            config = result.config
+            decoded = result.decoded
+            print(
+                f"{result.rank:>4} "
+                f"{quality.score:>7.1f} "
+                f"{quality.unknown_count:>7} "
+                f"{quality.token_count:>6} "
+                f"{quality.dot_count:>4} "
+                f"{quality.dash_count:>6} "
+                f"{quality.tone_ratio_error:>9.3f} "
+                f"{quality.gap_min_error:>7.3f} "
+                f"{quality.unit_cv:>7.3f} "
+                f"{config.frame_ms:>5.1f} "
+                f"{config.hop_ms:>3.1f} "
+                f"{config.bandwidth_hz:>9.1f} "
+                f"{config.threshold_ratio:>9.2f} "
+                f"{decoded.carrier_hz:>7.1f} "
+                f"{decoded.unit_s:>4.3f} "
+                f"{_display_text(decoded.text)}"
+            )
+        consensus = summarize_live_consensus(results)
+        print("consensus:")
+        print("rank count share best_score best_rank frame hop bandwidth threshold carrier unit text")
+        for result in consensus[: args.consensus_top]:
+            config = result.best_config
+            decoded = result.best_decoded
+            print(
+                f"{result.rank:>4} "
+                f"{result.count:>5} "
+                f"{result.share:>6.1%} "
+                f"{result.best_score:>10.1f} "
+                f"{result.best_rank:>9} "
+                f"{config.frame_ms:>5.1f} "
+                f"{config.hop_ms:>3.1f} "
+                f"{config.bandwidth_hz:>9.1f} "
+                f"{config.threshold_ratio:>9.2f} "
+                f"{decoded.carrier_hz:>7.1f} "
+                f"{decoded.unit_s:>4.3f} "
+                f"{_display_text(result.text)}"
+            )
+    elif args.command == "benchmark":
+        from cw.benchmark import (
+            check_benchmark_expectations,
+            parse_int_list,
+            parse_string_list,
+            run_benchmark,
+        )
+        from cw.contest import ContestGrid, parse_float_list
+
+        grid = ContestGrid(
+            frame_ms=parse_float_list(args.frame_ms),
+            hop_ms=parse_float_list(args.hop_ms),
+            bandwidth_hz=parse_float_list(args.bandwidth_hz),
+            threshold_ratio=parse_float_list(args.threshold_ratio),
+        )
+        results = run_benchmark(
+            args.text,
+            args.out_dir,
+            parse_string_list(args.presets),
+            parse_int_list(args.seeds),
+            grid,
+            min_tone_hz=args.min_tone_hz,
+            max_tone_hz=args.max_tone_hz,
+        )
+        print(f"cases={len(results)}")
+        print(
+            "preset seed known_ok known_score known_cfg live_ok live_score "
+            "live_known_rank live_cfg live_text"
+        )
+        for result in results:
+            known_config = result.known_best.config
+            live_config = result.live_best.config
+            print(
+                f"{result.preset:<6} "
+                f"{result.seed:>4} "
+                f"{str(result.known_best.evaluation.text_ok):>8} "
+                f"{result.known_best.score:>11.1f} "
+                f"{_format_config(known_config):>17} "
+                f"{str(result.live_evaluation.text_ok):>7} "
+                f"{result.live_best.quality.score:>10.1f} "
+                f"{str(result.live_rank_in_known):>15} "
+                f"{_format_config(live_config):>17} "
+                f"{result.live_best.decoded.text}"
+            )
+        if args.expect:
+            expectation = check_benchmark_expectations(
+                results,
+                parse_string_list(args.expected_pass_presets),
+                parse_string_list(args.allowed_fail_presets),
+            )
+            print(f"expectation_passed={expectation.passed}")
+            print(f"expected_pass_presets={','.join(expectation.expected_pass_presets)}")
+            print(f"allowed_fail_presets={','.join(expectation.allowed_fail_presets)}")
+            for failure in expectation.failures:
+                print(f"expectation_failure={failure}")
+            if not expectation.passed:
+                sys.exit(1)
+    elif args.command == "generate":
+        from cw.generator import generator_config_from_preset, override_generator_config, write_sample
+
+        config = override_generator_config(
+            generator_config_from_preset(args.preset),
+            sample_rate=args.sample_rate,
+            tone_hz=args.tone_hz,
+            wpm=args.wpm,
+            amplitude=args.amplitude,
+            timing_jitter=args.timing_jitter,
+            dot_jitter=args.dot_jitter,
+            dash_jitter=args.dash_jitter,
+            element_gap_jitter=args.element_gap_jitter,
+            letter_gap_jitter=args.letter_gap_jitter,
+            word_gap_jitter=args.word_gap_jitter,
+            dash_ratio=args.dash_ratio,
+            speed_wobble=args.speed_wobble,
+            speed_wobble_hz=args.speed_wobble_hz,
+            frequency_drift_hz=args.frequency_drift_hz,
+            frequency_wobble_hz=args.frequency_wobble_hz,
+            frequency_wobble_rate_hz=args.frequency_wobble_rate_hz,
+            amplitude_fade=args.amplitude_fade,
+            amplitude_fade_hz=args.amplitude_fade_hz,
+            noise_snr_db=args.noise_snr_db,
+            seed=args.seed,
+        )
+        label_path = write_sample(args.text, args.out, config)
+        print(f"Wrote {args.out}")
+        print(f"Wrote {label_path}")
+    elif args.command == "generate-multi":
+        from cw.multi_generator import parse_source_spec, write_multi_sample
+
+        sources = [
+            parse_source_spec(
+                source_spec,
+                index=index,
+                sample_rate=args.sample_rate,
+                seed=args.seed,
+            )
+            for index, source_spec in enumerate(args.source)
+        ]
+        result = write_multi_sample(
+            sources,
+            args.out,
+            sample_rate=args.sample_rate,
+            normalize_peak=args.normalize_peak,
+            noise_snr_db=args.mix_noise_snr_db,
+            seed=args.seed,
+        )
+        print(f"Wrote {result.wav_path}")
+        print(f"Wrote {result.label_path}")
+        print(f"sources={result.source_count}")
+        print(f"duration_s={result.duration_s:.3f}")
+        print(f"normalized_gain={result.normalized_gain:.3f}")
+    elif args.command == "detect-carriers":
+        from cw.multi_decoder import detect_carriers
+
+        carriers = detect_carriers(args.wav_path, _carrier_detection_config(args))
+        print(f"detected={len(carriers)}")
+        print("rank frequency_hz relative_power power")
+        for carrier in carriers:
+            print(
+                f"{carrier.rank:>4} "
+                f"{carrier.frequency_hz:>12.1f} "
+                f"{carrier.relative_power:>14.3f} "
+                f"{carrier.power:.6g}"
+            )
+    elif args.command == "contest-live-multi":
+        from cw.contest import ContestGrid, parse_float_list
+        from cw.multi_decoder import run_multi_live_contest
+
+        grid = ContestGrid(
+            frame_ms=parse_float_list(args.frame_ms),
+            hop_ms=parse_float_list(args.hop_ms),
+            bandwidth_hz=parse_float_list(args.bandwidth_hz),
+            threshold_ratio=parse_float_list(args.threshold_ratio),
+        )
+        results = run_multi_live_contest(args.wav_path, grid, _carrier_detection_config(args))
+        print(f"carriers={len(results)}")
+        print("source carrier_hz rel_power best_score consensus_share frame hop bandwidth threshold unit text")
+        for result in results:
+            best_consensus = result.best_consensus
+            config = best_consensus.best_config
+            decoded = best_consensus.best_decoded
+            print(
+                f"{result.rank:>6} "
+                f"{result.carrier.frequency_hz:>10.1f} "
+                f"{result.carrier.relative_power:>9.3f} "
+                f"{best_consensus.best_score:>10.1f} "
+                f"{best_consensus.share:>15.1%} "
+                f"{config.frame_ms:>5.1f} "
+                f"{config.hop_ms:>3.1f} "
+                f"{config.bandwidth_hz:>9.1f} "
+                f"{config.threshold_ratio:>9.2f} "
+                f"{decoded.unit_s:>4.3f} "
+                f"{_display_text(best_consensus.text)}"
+            )
+            if args.top > 0:
+                print("  top:")
+                for live_result in result.live_results[: args.top]:
+                    quality = live_result.quality
+                    cfg = live_result.config
+                    dec = live_result.decoded
+                    print(
+                        f"  {live_result.rank:>4} "
+                        f"score={quality.score:>6.1f} "
+                        f"f={cfg.frame_ms:g} h={cfg.hop_ms:g} b={cfg.bandwidth_hz:g} t={cfg.threshold_ratio:g} "
+                        f"unit={dec.unit_s:.3f} text={_display_text(dec.text)}"
+                    )
+            if args.consensus_top > 0:
+                print("  consensus:")
+                for consensus in result.consensus[: args.consensus_top]:
+                    print(
+                        f"  {consensus.rank:>4} "
+                        f"count={consensus.count:>3} "
+                        f"share={consensus.share:>6.1%} "
+                        f"score={consensus.best_score:>6.1f} "
+                        f"text={_display_text(consensus.text)}"
+                    )
+
+
+def _add_carrier_detection_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--detect-frame-ms", type=float, default=100.0)
+    parser.add_argument("--detect-hop-ms", type=float, default=20.0)
+    parser.add_argument("--detect-min-tone-hz", type=float, default=200.0)
+    parser.add_argument("--detect-max-tone-hz", type=float, default=2000.0)
+    parser.add_argument("--max-carriers", type=int, default=5)
+    parser.add_argument("--min-separation-hz", type=float, default=80.0)
+    parser.add_argument("--relative-threshold", type=float, default=0.15)
+
+
+def _carrier_detection_config(args: argparse.Namespace):
+    from cw.multi_decoder import CarrierDetectionConfig
+
+    return CarrierDetectionConfig(
+        frame_ms=args.detect_frame_ms,
+        hop_ms=args.detect_hop_ms,
+        min_tone_hz=args.detect_min_tone_hz,
+        max_tone_hz=args.detect_max_tone_hz,
+        max_carriers=args.max_carriers,
+        min_separation_hz=args.min_separation_hz,
+        relative_threshold=args.relative_threshold,
+    )
+
+
+def _add_decoder_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--frame-ms", type=float, default=20.0)
+    parser.add_argument("--hop-ms", type=float, default=10.0)
+    parser.add_argument("--min-tone-hz", type=float, default=200.0)
+    parser.add_argument("--max-tone-hz", type=float, default=2000.0)
+    parser.add_argument("--bandwidth-hz", type=float, default=40.0)
+    parser.add_argument("--threshold-ratio", type=float, default=0.35)
+
+
+def _decoder_config(args: argparse.Namespace):
+    from cw.decoder import DecoderConfig
+
+    return DecoderConfig(
+        frame_ms=args.frame_ms,
+        hop_ms=args.hop_ms,
+        min_tone_hz=args.min_tone_hz,
+        max_tone_hz=args.max_tone_hz,
+        bandwidth_hz=args.bandwidth_hz,
+        threshold_ratio=args.threshold_ratio,
+    )
+
+
+def _format_config(config) -> str:
+    return (
+        f"f{config.frame_ms:g}/h{config.hop_ms:g}/"
+        f"b{config.bandwidth_hz:g}/t{config.threshold_ratio:g}"
+    )
+
+
+def _display_text(text: str) -> str:
+    return text or "<empty>"
+
+
+if __name__ == "__main__":
+    main()
