@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 
-from cw.stream_models import StreamEvent, StreamingConfig, StreamSessionResult
+from cw.stream_models import StreamEvent, StreamingConfig, StreamSessionResult, channel_match_hz
 
 
 @dataclass
@@ -105,7 +105,7 @@ class ChannelRegistry:
         return self.channels
 
     def channel_for(self, carrier_hz: float, time_s: float = 0.0) -> ChannelState:
-        max_match_hz = max(self.config.min_separation_hz / 2, self.config.bandwidth_hz)
+        max_match_hz = channel_match_hz(self.config)
         candidates = [channel for channel in self._channels if abs(channel.carrier_hz - carrier_hz) <= max_match_hz]
         if candidates:
             channel = min(candidates, key=lambda existing: abs(existing.carrier_hz - carrier_hz))

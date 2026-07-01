@@ -1,0 +1,1242 @@
+{
+  "kind": "multi",
+  "sample_rate": 8000,
+  "duration_s": 9.300875,
+  "source_count": 2,
+  "normalize_peak": 0.95,
+  "normalized_gain": 0.8773327653,
+  "noise_snr_db": null,
+  "seed": null,
+  "sources": [
+    {
+      "id": "a",
+      "raw_text": "CQ CQ DE YU7NKA",
+      "text": "CQ CQ DE YU7NKA",
+      "start_s": 0.0,
+      "preset": "field",
+      "tone_hz": 700.0,
+      "wpm": 20.0,
+      "amplitude": 0.6,
+      "unit_s": 0.06,
+      "timing_jitter": 0.0,
+      "dot_jitter": 0.18,
+      "dash_jitter": 0.22,
+      "element_gap_jitter": 0.2,
+      "letter_gap_jitter": 0.35,
+      "word_gap_jitter": 0.2,
+      "dash_ratio": 2.8,
+      "speed_wobble": 0.06,
+      "speed_wobble_hz": 0.04,
+      "frequency_drift_hz": 40.0,
+      "frequency_start_hz": 680.0,
+      "frequency_end_hz": 720.0,
+      "frequency_wobble_hz": 10.0,
+      "frequency_wobble_rate_hz": 0.12,
+      "amplitude_fade": 0.3,
+      "amplitude_fade_hz": 0.18,
+      "noise_snr_db": 18.0,
+      "seed": 123,
+      "events": [
+        {
+          "kind": "tone",
+          "start_s": 0.0,
+          "relative_start_s": 0.0,
+          "duration_s": 0.1814794497,
+          "symbol": "-",
+          "char": "C"
+        },
+        {
+          "kind": "gap",
+          "start_s": 0.1814794497,
+          "relative_start_s": 0.1814794497,
+          "duration_s": 0.0494265516,
+          "symbol": "element_gap",
+          "char": "C"
+        },
+        {
+          "kind": "tone",
+          "start_s": 0.2309060013,
+          "relative_start_s": 0.2309060013,
+          "duration_s": 0.0541475547,
+          "symbol": ".",
+          "char": "C"
+        },
+        {
+          "kind": "gap",
+          "start_s": 0.285053556,
+          "relative_start_s": 0.285053556,
+          "duration_s": 0.0526500796,
+          "symbol": "element_gap",
+          "char": "C"
+        },
+        {
+          "kind": "tone",
+          "start_s": 0.3377036356,
+          "relative_start_s": 0.3377036356,
+          "duration_s": 0.1447756156,
+          "symbol": "-",
+          "char": "C"
+        },
+        {
+          "kind": "gap",
+          "start_s": 0.4824792512,
+          "relative_start_s": 0.4824792512,
+          "duration_s": 0.0679800989,
+          "symbol": "element_gap",
+          "char": "C"
+        },
+        {
+          "kind": "tone",
+          "start_s": 0.5504593501,
+          "relative_start_s": 0.5504593501,
+          "duration_s": 0.0697163707,
+          "symbol": ".",
+          "char": "C"
+        },
+        {
+          "kind": "gap",
+          "start_s": 0.6201757209,
+          "relative_start_s": 0.6201757209,
+          "duration_s": 0.1532627215,
+          "symbol": "letter_gap",
+          "char": null
+        },
+        {
+          "kind": "tone",
+          "start_s": 0.7734384424,
+          "relative_start_s": 0.7734384424,
+          "duration_s": 0.1938572955,
+          "symbol": "-",
+          "char": "Q"
+        },
+        {
+          "kind": "gap",
+          "start_s": 0.9672957379,
+          "relative_start_s": 0.9672957379,
+          "duration_s": 0.0703591692,
+          "symbol": "element_gap",
+          "char": "Q"
+        },
+        {
+          "kind": "tone",
+          "start_s": 1.037654907,
+          "relative_start_s": 1.037654907,
+          "duration_s": 0.1715726866,
+          "symbol": "-",
+          "char": "Q"
+        },
+        {
+          "kind": "gap",
+          "start_s": 1.2092275936,
+          "relative_start_s": 1.2092275936,
+          "duration_s": 0.0548465676,
+          "symbol": "element_gap",
+          "char": "Q"
+        },
+        {
+          "kind": "tone",
+          "start_s": 1.2640741612,
+          "relative_start_s": 1.2640741612,
+          "duration_s": 0.0682594505,
+          "symbol": ".",
+          "char": "Q"
+        },
+        {
+          "kind": "gap",
+          "start_s": 1.3323336117,
+          "relative_start_s": 1.3323336117,
+          "duration_s": 0.0541779219,
+          "symbol": "element_gap",
+          "char": "Q"
+        },
+        {
+          "kind": "tone",
+          "start_s": 1.3865115336,
+          "relative_start_s": 1.3865115336,
+          "duration_s": 0.1896568341,
+          "symbol": "-",
+          "char": "Q"
+        },
+        {
+          "kind": "gap",
+          "start_s": 1.5761683677,
+          "relative_start_s": 1.5761683677,
+          "duration_s": 0.4520588899,
+          "symbol": "word_gap",
+          "char": null
+        },
+        {
+          "kind": "tone",
+          "start_s": 2.0282272576,
+          "relative_start_s": 2.0282272576,
+          "duration_s": 0.2054375555,
+          "symbol": "-",
+          "char": "C"
+        },
+        {
+          "kind": "gap",
+          "start_s": 2.233664813,
+          "relative_start_s": 2.233664813,
+          "duration_s": 0.0552767607,
+          "symbol": "element_gap",
+          "char": "C"
+        },
+        {
+          "kind": "tone",
+          "start_s": 2.2889415737,
+          "relative_start_s": 2.2889415737,
+          "duration_s": 0.0686306504,
+          "symbol": ".",
+          "char": "C"
+        },
+        {
+          "kind": "gap",
+          "start_s": 2.3575722241,
+          "relative_start_s": 2.3575722241,
+          "duration_s": 0.0624610079,
+          "symbol": "element_gap",
+          "char": "C"
+        },
+        {
+          "kind": "tone",
+          "start_s": 2.420033232,
+          "relative_start_s": 2.420033232,
+          "duration_s": 0.1532360648,
+          "symbol": "-",
+          "char": "C"
+        },
+        {
+          "kind": "gap",
+          "start_s": 2.5732692968,
+          "relative_start_s": 2.5732692968,
+          "duration_s": 0.0538610913,
+          "symbol": "element_gap",
+          "char": "C"
+        },
+        {
+          "kind": "tone",
+          "start_s": 2.6271303881,
+          "relative_start_s": 2.6271303881,
+          "duration_s": 0.0621584723,
+          "symbol": ".",
+          "char": "C"
+        },
+        {
+          "kind": "gap",
+          "start_s": 2.6892888605,
+          "relative_start_s": 2.6892888605,
+          "duration_s": 0.1975709592,
+          "symbol": "letter_gap",
+          "char": null
+        },
+        {
+          "kind": "tone",
+          "start_s": 2.8868598197,
+          "relative_start_s": 2.8868598197,
+          "duration_s": 0.1504258167,
+          "symbol": "-",
+          "char": "Q"
+        },
+        {
+          "kind": "gap",
+          "start_s": 3.0372856364,
+          "relative_start_s": 3.0372856364,
+          "duration_s": 0.0503633889,
+          "symbol": "element_gap",
+          "char": "Q"
+        },
+        {
+          "kind": "tone",
+          "start_s": 3.0876490253,
+          "relative_start_s": 3.0876490253,
+          "duration_s": 0.1728369051,
+          "symbol": "-",
+          "char": "Q"
+        },
+        {
+          "kind": "gap",
+          "start_s": 3.2604859304,
+          "relative_start_s": 3.2604859304,
+          "duration_s": 0.0683487949,
+          "symbol": "element_gap",
+          "char": "Q"
+        },
+        {
+          "kind": "tone",
+          "start_s": 3.3288347254,
+          "relative_start_s": 3.3288347254,
+          "duration_s": 0.0721171168,
+          "symbol": ".",
+          "char": "Q"
+        },
+        {
+          "kind": "gap",
+          "start_s": 3.4009518421,
+          "relative_start_s": 3.4009518421,
+          "duration_s": 0.0658650601,
+          "symbol": "element_gap",
+          "char": "Q"
+        },
+        {
+          "kind": "tone",
+          "start_s": 3.4668169023,
+          "relative_start_s": 3.4668169023,
+          "duration_s": 0.2079622016,
+          "symbol": "-",
+          "char": "Q"
+        },
+        {
+          "kind": "gap",
+          "start_s": 3.6747791038,
+          "relative_start_s": 3.6747791038,
+          "duration_s": 0.5043041698,
+          "symbol": "word_gap",
+          "char": null
+        },
+        {
+          "kind": "tone",
+          "start_s": 4.1790832737,
+          "relative_start_s": 4.1790832737,
+          "duration_s": 0.1548257854,
+          "symbol": "-",
+          "char": "D"
+        },
+        {
+          "kind": "gap",
+          "start_s": 4.333909059,
+          "relative_start_s": 4.333909059,
+          "duration_s": 0.0724448952,
+          "symbol": "element_gap",
+          "char": "D"
+        },
+        {
+          "kind": "tone",
+          "start_s": 4.4063539543,
+          "relative_start_s": 4.4063539543,
+          "duration_s": 0.0684721657,
+          "symbol": ".",
+          "char": "D"
+        },
+        {
+          "kind": "gap",
+          "start_s": 4.4748261199,
+          "relative_start_s": 4.4748261199,
+          "duration_s": 0.0576278182,
+          "symbol": "element_gap",
+          "char": "D"
+        },
+        {
+          "kind": "tone",
+          "start_s": 4.5324539381,
+          "relative_start_s": 4.5324539381,
+          "duration_s": 0.0700355673,
+          "symbol": ".",
+          "char": "D"
+        },
+        {
+          "kind": "gap",
+          "start_s": 4.6024895054,
+          "relative_start_s": 4.6024895054,
+          "duration_s": 0.2384330072,
+          "symbol": "letter_gap",
+          "char": null
+        },
+        {
+          "kind": "tone",
+          "start_s": 4.8409225127,
+          "relative_start_s": 4.8409225127,
+          "duration_s": 0.0588006624,
+          "symbol": ".",
+          "char": "E"
+        },
+        {
+          "kind": "gap",
+          "start_s": 4.899723175,
+          "relative_start_s": 4.899723175,
+          "duration_s": 0.4485628861,
+          "symbol": "word_gap",
+          "char": null
+        },
+        {
+          "kind": "tone",
+          "start_s": 5.3482860611,
+          "relative_start_s": 5.3482860611,
+          "duration_s": 0.1442946157,
+          "symbol": "-",
+          "char": "Y"
+        },
+        {
+          "kind": "gap",
+          "start_s": 5.4925806768,
+          "relative_start_s": 5.4925806768,
+          "duration_s": 0.0656503901,
+          "symbol": "element_gap",
+          "char": "Y"
+        },
+        {
+          "kind": "tone",
+          "start_s": 5.5582310669,
+          "relative_start_s": 5.5582310669,
+          "duration_s": 0.0575499532,
+          "symbol": ".",
+          "char": "Y"
+        },
+        {
+          "kind": "gap",
+          "start_s": 5.6157810201,
+          "relative_start_s": 5.6157810201,
+          "duration_s": 0.070290202,
+          "symbol": "element_gap",
+          "char": "Y"
+        },
+        {
+          "kind": "tone",
+          "start_s": 5.6860712221,
+          "relative_start_s": 5.6860712221,
+          "duration_s": 0.1524207836,
+          "symbol": "-",
+          "char": "Y"
+        },
+        {
+          "kind": "gap",
+          "start_s": 5.8384920057,
+          "relative_start_s": 5.8384920057,
+          "duration_s": 0.0588183676,
+          "symbol": "element_gap",
+          "char": "Y"
+        },
+        {
+          "kind": "tone",
+          "start_s": 5.8973103732,
+          "relative_start_s": 5.8973103732,
+          "duration_s": 0.1400054307,
+          "symbol": "-",
+          "char": "Y"
+        },
+        {
+          "kind": "gap",
+          "start_s": 6.0373158039,
+          "relative_start_s": 6.0373158039,
+          "duration_s": 0.1283572566,
+          "symbol": "letter_gap",
+          "char": null
+        },
+        {
+          "kind": "tone",
+          "start_s": 6.1656730604,
+          "relative_start_s": 6.1656730604,
+          "duration_s": 0.0635236779,
+          "symbol": ".",
+          "char": "U"
+        },
+        {
+          "kind": "gap",
+          "start_s": 6.2291967383,
+          "relative_start_s": 6.2291967383,
+          "duration_s": 0.0627938223,
+          "symbol": "element_gap",
+          "char": "U"
+        },
+        {
+          "kind": "tone",
+          "start_s": 6.2919905606,
+          "relative_start_s": 6.2919905606,
+          "duration_s": 0.055075424,
+          "symbol": ".",
+          "char": "U"
+        },
+        {
+          "kind": "gap",
+          "start_s": 6.3470659846,
+          "relative_start_s": 6.3470659846,
+          "duration_s": 0.0574314228,
+          "symbol": "element_gap",
+          "char": "U"
+        },
+        {
+          "kind": "tone",
+          "start_s": 6.4044974074,
+          "relative_start_s": 6.4044974074,
+          "duration_s": 0.1391457194,
+          "symbol": "-",
+          "char": "U"
+        },
+        {
+          "kind": "gap",
+          "start_s": 6.5436431268,
+          "relative_start_s": 6.5436431268,
+          "duration_s": 0.174888458,
+          "symbol": "letter_gap",
+          "char": null
+        },
+        {
+          "kind": "tone",
+          "start_s": 6.7185315848,
+          "relative_start_s": 6.7185315848,
+          "duration_s": 0.1839529154,
+          "symbol": "-",
+          "char": "7"
+        },
+        {
+          "kind": "gap",
+          "start_s": 6.9024845002,
+          "relative_start_s": 6.9024845002,
+          "duration_s": 0.0617035883,
+          "symbol": "element_gap",
+          "char": "7"
+        },
+        {
+          "kind": "tone",
+          "start_s": 6.9641880885,
+          "relative_start_s": 6.9641880885,
+          "duration_s": 0.2041511878,
+          "symbol": "-",
+          "char": "7"
+        },
+        {
+          "kind": "gap",
+          "start_s": 7.1683392763,
+          "relative_start_s": 7.1683392763,
+          "duration_s": 0.0664636274,
+          "symbol": "element_gap",
+          "char": "7"
+        },
+        {
+          "kind": "tone",
+          "start_s": 7.2348029037,
+          "relative_start_s": 7.2348029037,
+          "duration_s": 0.058143789,
+          "symbol": ".",
+          "char": "7"
+        },
+        {
+          "kind": "gap",
+          "start_s": 7.2929466928,
+          "relative_start_s": 7.2929466928,
+          "duration_s": 0.0713741374,
+          "symbol": "element_gap",
+          "char": "7"
+        },
+        {
+          "kind": "tone",
+          "start_s": 7.3643208301,
+          "relative_start_s": 7.3643208301,
+          "duration_s": 0.0634480151,
+          "symbol": ".",
+          "char": "7"
+        },
+        {
+          "kind": "gap",
+          "start_s": 7.4277688452,
+          "relative_start_s": 7.4277688452,
+          "duration_s": 0.0700113596,
+          "symbol": "element_gap",
+          "char": "7"
+        },
+        {
+          "kind": "tone",
+          "start_s": 7.4977802048,
+          "relative_start_s": 7.4977802048,
+          "duration_s": 0.064933422,
+          "symbol": ".",
+          "char": "7"
+        },
+        {
+          "kind": "gap",
+          "start_s": 7.5627136267,
+          "relative_start_s": 7.5627136267,
+          "duration_s": 0.1818875759,
+          "symbol": "letter_gap",
+          "char": null
+        },
+        {
+          "kind": "tone",
+          "start_s": 7.7446012027,
+          "relative_start_s": 7.7446012027,
+          "duration_s": 0.1692724476,
+          "symbol": "-",
+          "char": "N"
+        },
+        {
+          "kind": "gap",
+          "start_s": 7.9138736503,
+          "relative_start_s": 7.9138736503,
+          "duration_s": 0.0511947392,
+          "symbol": "element_gap",
+          "char": "N"
+        },
+        {
+          "kind": "tone",
+          "start_s": 7.9650683895,
+          "relative_start_s": 7.9650683895,
+          "duration_s": 0.0625725976,
+          "symbol": ".",
+          "char": "N"
+        },
+        {
+          "kind": "gap",
+          "start_s": 8.027640987,
+          "relative_start_s": 8.027640987,
+          "duration_s": 0.2061507274,
+          "symbol": "letter_gap",
+          "char": null
+        },
+        {
+          "kind": "tone",
+          "start_s": 8.2337917144,
+          "relative_start_s": 8.2337917144,
+          "duration_s": 0.2115673146,
+          "symbol": "-",
+          "char": "K"
+        },
+        {
+          "kind": "gap",
+          "start_s": 8.4453590291,
+          "relative_start_s": 8.4453590291,
+          "duration_s": 0.0614342987,
+          "symbol": "element_gap",
+          "char": "K"
+        },
+        {
+          "kind": "tone",
+          "start_s": 8.5067933278,
+          "relative_start_s": 8.5067933278,
+          "duration_s": 0.0627104421,
+          "symbol": ".",
+          "char": "K"
+        },
+        {
+          "kind": "gap",
+          "start_s": 8.5695037699,
+          "relative_start_s": 8.5695037699,
+          "duration_s": 0.0634871659,
+          "symbol": "element_gap",
+          "char": "K"
+        },
+        {
+          "kind": "tone",
+          "start_s": 8.6329909358,
+          "relative_start_s": 8.6329909358,
+          "duration_s": 0.1692337673,
+          "symbol": "-",
+          "char": "K"
+        },
+        {
+          "kind": "gap",
+          "start_s": 8.8022247031,
+          "relative_start_s": 8.8022247031,
+          "duration_s": 0.1990588629,
+          "symbol": "letter_gap",
+          "char": null
+        },
+        {
+          "kind": "tone",
+          "start_s": 9.001283566,
+          "relative_start_s": 9.001283566,
+          "duration_s": 0.0530637549,
+          "symbol": ".",
+          "char": "A"
+        },
+        {
+          "kind": "gap",
+          "start_s": 9.0543473209,
+          "relative_start_s": 9.0543473209,
+          "duration_s": 0.0624507165,
+          "symbol": "element_gap",
+          "char": "A"
+        },
+        {
+          "kind": "tone",
+          "start_s": 9.1167980374,
+          "relative_start_s": 9.1167980374,
+          "duration_s": 0.1840838556,
+          "symbol": "-",
+          "char": "A"
+        }
+      ]
+    },
+    {
+      "id": "b",
+      "raw_text": "CQ CQ DE YT7MK",
+      "text": "CQ CQ DE YT7MK",
+      "start_s": 0.4,
+      "preset": "straight",
+      "tone_hz": 740.0,
+      "wpm": 20.0,
+      "amplitude": 0.45,
+      "unit_s": 0.06,
+      "timing_jitter": 0.0,
+      "dot_jitter": 0.18,
+      "dash_jitter": 0.22,
+      "element_gap_jitter": 0.2,
+      "letter_gap_jitter": 0.35,
+      "word_gap_jitter": 0.2,
+      "dash_ratio": 2.8,
+      "speed_wobble": 0.06,
+      "speed_wobble_hz": 0.04,
+      "frequency_drift_hz": 0.0,
+      "frequency_start_hz": 740.0,
+      "frequency_end_hz": 740.0,
+      "frequency_wobble_hz": 0.0,
+      "frequency_wobble_rate_hz": 0.0,
+      "amplitude_fade": 0.0,
+      "amplitude_fade_hz": 0.0,
+      "noise_snr_db": null,
+      "seed": 123,
+      "events": [
+        {
+          "kind": "tone",
+          "start_s": 0.4,
+          "relative_start_s": 0.0,
+          "duration_s": 0.1814794497,
+          "symbol": "-",
+          "char": "C"
+        },
+        {
+          "kind": "gap",
+          "start_s": 0.5814794497,
+          "relative_start_s": 0.1814794497,
+          "duration_s": 0.0494265516,
+          "symbol": "element_gap",
+          "char": "C"
+        },
+        {
+          "kind": "tone",
+          "start_s": 0.6309060013,
+          "relative_start_s": 0.2309060013,
+          "duration_s": 0.0541475547,
+          "symbol": ".",
+          "char": "C"
+        },
+        {
+          "kind": "gap",
+          "start_s": 0.685053556,
+          "relative_start_s": 0.285053556,
+          "duration_s": 0.0526500796,
+          "symbol": "element_gap",
+          "char": "C"
+        },
+        {
+          "kind": "tone",
+          "start_s": 0.7377036356,
+          "relative_start_s": 0.3377036356,
+          "duration_s": 0.1447756156,
+          "symbol": "-",
+          "char": "C"
+        },
+        {
+          "kind": "gap",
+          "start_s": 0.8824792512,
+          "relative_start_s": 0.4824792512,
+          "duration_s": 0.0679800989,
+          "symbol": "element_gap",
+          "char": "C"
+        },
+        {
+          "kind": "tone",
+          "start_s": 0.9504593501,
+          "relative_start_s": 0.5504593501,
+          "duration_s": 0.0697163707,
+          "symbol": ".",
+          "char": "C"
+        },
+        {
+          "kind": "gap",
+          "start_s": 1.0201757209,
+          "relative_start_s": 0.6201757209,
+          "duration_s": 0.1532627215,
+          "symbol": "letter_gap",
+          "char": null
+        },
+        {
+          "kind": "tone",
+          "start_s": 1.1734384424,
+          "relative_start_s": 0.7734384424,
+          "duration_s": 0.1938572955,
+          "symbol": "-",
+          "char": "Q"
+        },
+        {
+          "kind": "gap",
+          "start_s": 1.3672957379,
+          "relative_start_s": 0.9672957379,
+          "duration_s": 0.0703591692,
+          "symbol": "element_gap",
+          "char": "Q"
+        },
+        {
+          "kind": "tone",
+          "start_s": 1.437654907,
+          "relative_start_s": 1.037654907,
+          "duration_s": 0.1715726866,
+          "symbol": "-",
+          "char": "Q"
+        },
+        {
+          "kind": "gap",
+          "start_s": 1.6092275936,
+          "relative_start_s": 1.2092275936,
+          "duration_s": 0.0548465676,
+          "symbol": "element_gap",
+          "char": "Q"
+        },
+        {
+          "kind": "tone",
+          "start_s": 1.6640741612,
+          "relative_start_s": 1.2640741612,
+          "duration_s": 0.0682594505,
+          "symbol": ".",
+          "char": "Q"
+        },
+        {
+          "kind": "gap",
+          "start_s": 1.7323336117,
+          "relative_start_s": 1.3323336117,
+          "duration_s": 0.0541779219,
+          "symbol": "element_gap",
+          "char": "Q"
+        },
+        {
+          "kind": "tone",
+          "start_s": 1.7865115336,
+          "relative_start_s": 1.3865115336,
+          "duration_s": 0.1896568341,
+          "symbol": "-",
+          "char": "Q"
+        },
+        {
+          "kind": "gap",
+          "start_s": 1.9761683677,
+          "relative_start_s": 1.5761683677,
+          "duration_s": 0.4520588899,
+          "symbol": "word_gap",
+          "char": null
+        },
+        {
+          "kind": "tone",
+          "start_s": 2.4282272576,
+          "relative_start_s": 2.0282272576,
+          "duration_s": 0.2054375555,
+          "symbol": "-",
+          "char": "C"
+        },
+        {
+          "kind": "gap",
+          "start_s": 2.633664813,
+          "relative_start_s": 2.233664813,
+          "duration_s": 0.0552767607,
+          "symbol": "element_gap",
+          "char": "C"
+        },
+        {
+          "kind": "tone",
+          "start_s": 2.6889415737,
+          "relative_start_s": 2.2889415737,
+          "duration_s": 0.0686306504,
+          "symbol": ".",
+          "char": "C"
+        },
+        {
+          "kind": "gap",
+          "start_s": 2.7575722241,
+          "relative_start_s": 2.3575722241,
+          "duration_s": 0.0624610079,
+          "symbol": "element_gap",
+          "char": "C"
+        },
+        {
+          "kind": "tone",
+          "start_s": 2.820033232,
+          "relative_start_s": 2.420033232,
+          "duration_s": 0.1532360648,
+          "symbol": "-",
+          "char": "C"
+        },
+        {
+          "kind": "gap",
+          "start_s": 2.9732692968,
+          "relative_start_s": 2.5732692968,
+          "duration_s": 0.0538610913,
+          "symbol": "element_gap",
+          "char": "C"
+        },
+        {
+          "kind": "tone",
+          "start_s": 3.0271303881,
+          "relative_start_s": 2.6271303881,
+          "duration_s": 0.0621584723,
+          "symbol": ".",
+          "char": "C"
+        },
+        {
+          "kind": "gap",
+          "start_s": 3.0892888605,
+          "relative_start_s": 2.6892888605,
+          "duration_s": 0.1975709592,
+          "symbol": "letter_gap",
+          "char": null
+        },
+        {
+          "kind": "tone",
+          "start_s": 3.2868598197,
+          "relative_start_s": 2.8868598197,
+          "duration_s": 0.1504258167,
+          "symbol": "-",
+          "char": "Q"
+        },
+        {
+          "kind": "gap",
+          "start_s": 3.4372856364,
+          "relative_start_s": 3.0372856364,
+          "duration_s": 0.0503633889,
+          "symbol": "element_gap",
+          "char": "Q"
+        },
+        {
+          "kind": "tone",
+          "start_s": 3.4876490253,
+          "relative_start_s": 3.0876490253,
+          "duration_s": 0.1728369051,
+          "symbol": "-",
+          "char": "Q"
+        },
+        {
+          "kind": "gap",
+          "start_s": 3.6604859304,
+          "relative_start_s": 3.2604859304,
+          "duration_s": 0.0683487949,
+          "symbol": "element_gap",
+          "char": "Q"
+        },
+        {
+          "kind": "tone",
+          "start_s": 3.7288347254,
+          "relative_start_s": 3.3288347254,
+          "duration_s": 0.0721171168,
+          "symbol": ".",
+          "char": "Q"
+        },
+        {
+          "kind": "gap",
+          "start_s": 3.8009518421,
+          "relative_start_s": 3.4009518421,
+          "duration_s": 0.0658650601,
+          "symbol": "element_gap",
+          "char": "Q"
+        },
+        {
+          "kind": "tone",
+          "start_s": 3.8668169023,
+          "relative_start_s": 3.4668169023,
+          "duration_s": 0.2079622016,
+          "symbol": "-",
+          "char": "Q"
+        },
+        {
+          "kind": "gap",
+          "start_s": 4.0747791038,
+          "relative_start_s": 3.6747791038,
+          "duration_s": 0.5043041698,
+          "symbol": "word_gap",
+          "char": null
+        },
+        {
+          "kind": "tone",
+          "start_s": 4.5790832737,
+          "relative_start_s": 4.1790832737,
+          "duration_s": 0.1548257854,
+          "symbol": "-",
+          "char": "D"
+        },
+        {
+          "kind": "gap",
+          "start_s": 4.733909059,
+          "relative_start_s": 4.333909059,
+          "duration_s": 0.0724448952,
+          "symbol": "element_gap",
+          "char": "D"
+        },
+        {
+          "kind": "tone",
+          "start_s": 4.8063539543,
+          "relative_start_s": 4.4063539543,
+          "duration_s": 0.0684721657,
+          "symbol": ".",
+          "char": "D"
+        },
+        {
+          "kind": "gap",
+          "start_s": 4.8748261199,
+          "relative_start_s": 4.4748261199,
+          "duration_s": 0.0576278182,
+          "symbol": "element_gap",
+          "char": "D"
+        },
+        {
+          "kind": "tone",
+          "start_s": 4.9324539381,
+          "relative_start_s": 4.5324539381,
+          "duration_s": 0.0700355673,
+          "symbol": ".",
+          "char": "D"
+        },
+        {
+          "kind": "gap",
+          "start_s": 5.0024895054,
+          "relative_start_s": 4.6024895054,
+          "duration_s": 0.2384330072,
+          "symbol": "letter_gap",
+          "char": null
+        },
+        {
+          "kind": "tone",
+          "start_s": 5.2409225127,
+          "relative_start_s": 4.8409225127,
+          "duration_s": 0.0588006624,
+          "symbol": ".",
+          "char": "E"
+        },
+        {
+          "kind": "gap",
+          "start_s": 5.299723175,
+          "relative_start_s": 4.899723175,
+          "duration_s": 0.4485628861,
+          "symbol": "word_gap",
+          "char": null
+        },
+        {
+          "kind": "tone",
+          "start_s": 5.7482860611,
+          "relative_start_s": 5.3482860611,
+          "duration_s": 0.1442946157,
+          "symbol": "-",
+          "char": "Y"
+        },
+        {
+          "kind": "gap",
+          "start_s": 5.8925806768,
+          "relative_start_s": 5.4925806768,
+          "duration_s": 0.0656503901,
+          "symbol": "element_gap",
+          "char": "Y"
+        },
+        {
+          "kind": "tone",
+          "start_s": 5.9582310669,
+          "relative_start_s": 5.5582310669,
+          "duration_s": 0.0575499532,
+          "symbol": ".",
+          "char": "Y"
+        },
+        {
+          "kind": "gap",
+          "start_s": 6.0157810201,
+          "relative_start_s": 5.6157810201,
+          "duration_s": 0.070290202,
+          "symbol": "element_gap",
+          "char": "Y"
+        },
+        {
+          "kind": "tone",
+          "start_s": 6.0860712221,
+          "relative_start_s": 5.6860712221,
+          "duration_s": 0.1524207836,
+          "symbol": "-",
+          "char": "Y"
+        },
+        {
+          "kind": "gap",
+          "start_s": 6.2384920057,
+          "relative_start_s": 5.8384920057,
+          "duration_s": 0.0588183676,
+          "symbol": "element_gap",
+          "char": "Y"
+        },
+        {
+          "kind": "tone",
+          "start_s": 6.2973103732,
+          "relative_start_s": 5.8973103732,
+          "duration_s": 0.1400054307,
+          "symbol": "-",
+          "char": "Y"
+        },
+        {
+          "kind": "gap",
+          "start_s": 6.4373158039,
+          "relative_start_s": 6.0373158039,
+          "duration_s": 0.1283572566,
+          "symbol": "letter_gap",
+          "char": null
+        },
+        {
+          "kind": "tone",
+          "start_s": 6.5656730604,
+          "relative_start_s": 6.1656730604,
+          "duration_s": 0.1778193117,
+          "symbol": "-",
+          "char": "T"
+        },
+        {
+          "kind": "gap",
+          "start_s": 6.7434923721,
+          "relative_start_s": 6.3434923721,
+          "duration_s": 0.1865649069,
+          "symbol": "letter_gap",
+          "char": null
+        },
+        {
+          "kind": "tone",
+          "start_s": 6.9300572791,
+          "relative_start_s": 6.5300572791,
+          "duration_s": 0.1488867306,
+          "symbol": "-",
+          "char": "7"
+        },
+        {
+          "kind": "gap",
+          "start_s": 7.0789440097,
+          "relative_start_s": 6.6789440097,
+          "duration_s": 0.0574135175,
+          "symbol": "element_gap",
+          "char": "7"
+        },
+        {
+          "kind": "tone",
+          "start_s": 7.1363575272,
+          "relative_start_s": 6.7363575272,
+          "duration_s": 0.1390928867,
+          "symbol": "-",
+          "char": "7"
+        },
+        {
+          "kind": "gap",
+          "start_s": 7.2754504138,
+          "relative_start_s": 6.8754504138,
+          "duration_s": 0.0605320893,
+          "symbol": "element_gap",
+          "char": "7"
+        },
+        {
+          "kind": "tone",
+          "start_s": 7.3359825032,
+          "relative_start_s": 6.9359825032,
+          "duration_s": 0.0652823617,
+          "symbol": ".",
+          "char": "7"
+        },
+        {
+          "kind": "gap",
+          "start_s": 7.4012648649,
+          "relative_start_s": 7.0012648649,
+          "duration_s": 0.0616883608,
+          "symbol": "element_gap",
+          "char": "7"
+        },
+        {
+          "kind": "tone",
+          "start_s": 7.4629532257,
+          "relative_start_s": 7.0629532257,
+          "duration_s": 0.0711885889,
+          "symbol": ".",
+          "char": "7"
+        },
+        {
+          "kind": "gap",
+          "start_s": 7.5341418146,
+          "relative_start_s": 7.1341418146,
+          "duration_s": 0.0664708998,
+          "symbol": "element_gap",
+          "char": "7"
+        },
+        {
+          "kind": "tone",
+          "start_s": 7.6006127143,
+          "relative_start_s": 7.2006127143,
+          "duration_s": 0.0581506114,
+          "symbol": ".",
+          "char": "7"
+        },
+        {
+          "kind": "gap",
+          "start_s": 7.6587633257,
+          "relative_start_s": 7.2587633257,
+          "duration_s": 0.2319197058,
+          "symbol": "letter_gap",
+          "char": null
+        },
+        {
+          "kind": "tone",
+          "start_s": 7.8906830315,
+          "relative_start_s": 7.4906830315,
+          "duration_s": 0.1775538112,
+          "symbol": "-",
+          "char": "M"
+        },
+        {
+          "kind": "gap",
+          "start_s": 8.0682368427,
+          "relative_start_s": 7.6682368427,
+          "duration_s": 0.0699344288,
+          "symbol": "element_gap",
+          "char": "M"
+        },
+        {
+          "kind": "tone",
+          "start_s": 8.1381712715,
+          "relative_start_s": 7.7381712715,
+          "duration_s": 0.1825412964,
+          "symbol": "-",
+          "char": "M"
+        },
+        {
+          "kind": "gap",
+          "start_s": 8.3207125679,
+          "relative_start_s": 7.9207125679,
+          "duration_s": 0.1815474384,
+          "symbol": "letter_gap",
+          "char": null
+        },
+        {
+          "kind": "tone",
+          "start_s": 8.5022600063,
+          "relative_start_s": 8.1022600063,
+          "duration_s": 0.1689195251,
+          "symbol": "-",
+          "char": "K"
+        },
+        {
+          "kind": "gap",
+          "start_s": 8.6711795313,
+          "relative_start_s": 8.2711795313,
+          "duration_s": 0.0510779648,
+          "symbol": "element_gap",
+          "char": "K"
+        },
+        {
+          "kind": "tone",
+          "start_s": 8.7222574961,
+          "relative_start_s": 8.3222574961,
+          "duration_s": 0.0624262121,
+          "symbol": ".",
+          "char": "K"
+        },
+        {
+          "kind": "gap",
+          "start_s": 8.7846837083,
+          "relative_start_s": 8.3846837083,
+          "duration_s": 0.0662125296,
+          "symbol": "element_gap",
+          "char": "K"
+        },
+        {
+          "kind": "tone",
+          "start_s": 8.8508962379,
+          "relative_start_s": 8.4508962379,
+          "duration_s": 0.2112370813,
+          "symbol": "-",
+          "char": "K"
+        }
+      ]
+    }
+  ]
+}

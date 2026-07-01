@@ -18,7 +18,11 @@ class StreamingConfig:
     bandwidth_hz: float = 40.0
     threshold_ratio: float = 0.35
     peak_relative_threshold: float = 0.25
+    track_relative_threshold: float = 0.10
     min_separation_hz: float = 80.0
+    peak_min_separation_hz: float | None = None
+    track_match_hz: float | None = None
+    channel_merge_hz: float | None = None
     max_tracks: int = 5
     max_track_gap_s: float = 2.0
     carrier_smoothing: float = 0.20
@@ -97,6 +101,22 @@ class SpectrumFrame:
     freqs: np.ndarray
 
 
+def peak_min_separation_hz(config: StreamingConfig) -> float:
+    return config.peak_min_separation_hz or config.min_separation_hz
+
+
+def track_match_hz(config: StreamingConfig) -> float:
+    return config.track_match_hz or max(config.bandwidth_hz, config.min_separation_hz)
+
+
+def channel_merge_hz(config: StreamingConfig) -> float:
+    return config.channel_merge_hz or config.min_separation_hz
+
+
+def channel_match_hz(config: StreamingConfig) -> float:
+    return max(channel_merge_hz(config) / 2.0, config.bandwidth_hz)
+
+
 def validate_streaming_config(config: StreamingConfig) -> None:
     if config.input_block_ms <= 0:
         raise ValueError("input_block_ms must be positive")
@@ -112,8 +132,16 @@ def validate_streaming_config(config: StreamingConfig) -> None:
         raise ValueError("threshold_ratio must be in the (0, 1) range")
     if not 0 < config.peak_relative_threshold <= 1:
         raise ValueError("peak_relative_threshold must be in the (0, 1] range")
+    if not 0 < config.track_relative_threshold <= 1:
+        raise ValueError("track_relative_threshold must be in the (0, 1] range")
     if config.min_separation_hz <= 0:
         raise ValueError("min_separation_hz must be positive")
+    if config.peak_min_separation_hz is not None and config.peak_min_separation_hz <= 0:
+        raise ValueError("peak_min_separation_hz must be positive when set")
+    if config.track_match_hz is not None and config.track_match_hz <= 0:
+        raise ValueError("track_match_hz must be positive when set")
+    if config.channel_merge_hz is not None and config.channel_merge_hz <= 0:
+        raise ValueError("channel_merge_hz must be positive when set")
     if config.max_tracks <= 0:
         raise ValueError("max_tracks must be positive")
     if not 0 <= config.carrier_smoothing <= 1:

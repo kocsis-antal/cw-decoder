@@ -150,7 +150,11 @@ def main() -> None:
     stream_sim_parser.add_argument("--bandwidth-hz", type=float, default=40.0)
     stream_sim_parser.add_argument("--threshold-ratio", type=float, default=0.35)
     stream_sim_parser.add_argument("--peak-relative-threshold", type=float, default=0.25)
+    stream_sim_parser.add_argument("--track-relative-threshold", type=float, default=0.10)
     stream_sim_parser.add_argument("--min-separation-hz", type=float, default=80.0)
+    stream_sim_parser.add_argument("--peak-min-separation-hz", type=float, default=None)
+    stream_sim_parser.add_argument("--track-match-hz", type=float, default=None)
+    stream_sim_parser.add_argument("--channel-merge-hz", type=float, default=None)
     stream_sim_parser.add_argument("--max-tracks", type=int, default=5)
     stream_sim_parser.add_argument("--max-track-gap-s", type=float, default=2.0)
     stream_sim_parser.add_argument("--carrier-smoothing", type=float, default=0.20)
@@ -164,6 +168,38 @@ def main() -> None:
     stream_sim_parser.add_argument("--raw-updates", action="store_true")
     stream_sim_parser.add_argument("--updates", type=int, default=20)
     stream_sim_parser.add_argument("--events", action="store_true", help="Print channel/session lifecycle events")
+
+    spacing_parser = subparsers.add_parser("spacing-benchmark")
+    spacing_parser.add_argument("--text-a", default="CQ CQ DE YU7NKA")
+    spacing_parser.add_argument("--text-b", default="CQ CQ DE YT7MK")
+    spacing_parser.add_argument("--out-dir", type=Path, default=Path("samples/spacing"))
+    spacing_parser.add_argument("--base-freq", type=float, default=700.0)
+    spacing_parser.add_argument("--deltas", default="40,60,80,100,120,150")
+    spacing_parser.add_argument("--merge-below-hz", type=float, default=60.0)
+    spacing_parser.add_argument("--split-from-hz", type=float, default=100.0)
+    spacing_parser.add_argument("--preset-a", default="field")
+    spacing_parser.add_argument("--preset-b", default="straight")
+    spacing_parser.add_argument("--wpm-a", type=float, default=20.0)
+    spacing_parser.add_argument("--wpm-b", type=float, default=18.0)
+    spacing_parser.add_argument("--amplitude-a", type=float, default=0.60)
+    spacing_parser.add_argument("--amplitude-b", type=float, default=0.45)
+    spacing_parser.add_argument("--start-b", type=float, default=0.40)
+    spacing_parser.add_argument("--sample-rate", type=int, default=8000)
+    spacing_parser.add_argument("--seed", type=int, default=123)
+    spacing_parser.add_argument("--normalize-peak", type=float, default=0.95)
+    spacing_parser.add_argument("--mix-noise-snr-db", type=float, default=None)
+    spacing_parser.add_argument("--stream-frame-ms", type=float, default=80.0)
+    spacing_parser.add_argument("--stream-hop-ms", type=float, default=10.0)
+    spacing_parser.add_argument("--stream-bandwidth-hz", type=float, default=40.0)
+    spacing_parser.add_argument("--stream-threshold-ratio", type=float, default=0.35)
+    spacing_parser.add_argument("--peak-relative-threshold", type=float, default=0.25)
+    spacing_parser.add_argument("--track-relative-threshold", type=float, default=0.10)
+    spacing_parser.add_argument("--min-separation-hz", type=float, default=80.0)
+    spacing_parser.add_argument("--peak-min-separation-hz", type=float, default=None)
+    spacing_parser.add_argument("--track-match-hz", type=float, default=None)
+    spacing_parser.add_argument("--channel-merge-hz", type=float, default=None)
+    spacing_parser.add_argument("--max-tracks", type=int, default=5)
+    spacing_parser.add_argument("--expect", action="store_true")
 
     args = parser.parse_args()
 
@@ -521,6 +557,67 @@ def main() -> None:
                         f"score={consensus.best_score:>6.1f} "
                         f"text={_display_text(consensus.text)}"
                     )
+    elif args.command == "spacing-benchmark":
+        from cw.spacing_benchmark import (
+            SpacingBenchmarkConfig,
+            check_spacing_expectations,
+            parse_float_list as parse_spacing_float_list,
+            run_spacing_benchmark,
+        )
+
+        spacing_config = SpacingBenchmarkConfig(
+            base_frequency_hz=args.base_freq,
+            deltas_hz=parse_spacing_float_list(args.deltas),
+            merge_below_hz=args.merge_below_hz,
+            split_from_hz=args.split_from_hz,
+            source_a_preset=args.preset_a,
+            source_b_preset=args.preset_b,
+            source_a_wpm=args.wpm_a,
+            source_b_wpm=args.wpm_b,
+            source_a_amplitude=args.amplitude_a,
+            source_b_amplitude=args.amplitude_b,
+            source_b_start_s=args.start_b,
+            sample_rate=args.sample_rate,
+            seed=args.seed,
+            normalize_peak=args.normalize_peak,
+            mix_noise_snr_db=args.mix_noise_snr_db,
+            stream_frame_ms=args.stream_frame_ms,
+            stream_hop_ms=args.stream_hop_ms,
+            stream_bandwidth_hz=args.stream_bandwidth_hz,
+            stream_threshold_ratio=args.stream_threshold_ratio,
+            peak_relative_threshold=args.peak_relative_threshold,
+            track_relative_threshold=args.track_relative_threshold,
+            min_separation_hz=args.min_separation_hz,
+            peak_min_separation_hz=args.peak_min_separation_hz,
+            track_match_hz=args.track_match_hz,
+            channel_merge_hz=args.channel_merge_hz,
+            max_tracks=args.max_tracks,
+        )
+        results = run_spacing_benchmark(args.text_a, args.text_b, args.out_dir, spacing_config)
+        print(f"cases={len(results)}")
+        print(
+            "delta_hz expected result channels carriers source_a_ok source_b_ok texts"
+        )
+        for result in results:
+            carrier_text = ",".join(f"{carrier:.1f}" for carrier in result.carriers_hz) or "-"
+            decoded_text = " || ".join(_display_text(text) for text in result.decoded_texts) or "<none>"
+            print(
+                f"{result.delta_hz:>8.1f} "
+                f"{result.expected:<9} "
+                f"{result.result_label:<6} "
+                f"{result.detected_channels:>8} "
+                f"{carrier_text:<16} "
+                f"{str(result.source_a_ok):>11} "
+                f"{str(result.source_b_ok):>11} "
+                f"{decoded_text}"
+            )
+        if args.expect:
+            expectation = check_spacing_expectations(results)
+            print(f"expectation_passed={expectation.passed}")
+            for failure in expectation.failures:
+                print(f"expectation_failure={failure}")
+            if not expectation.passed:
+                sys.exit(1)
     elif args.command == "stream-sim":
         from cw.streaming import simulate_stream_from_wav
 
@@ -647,7 +744,11 @@ def _streaming_config(args: argparse.Namespace):
         bandwidth_hz=args.bandwidth_hz,
         threshold_ratio=args.threshold_ratio,
         peak_relative_threshold=args.peak_relative_threshold,
+        track_relative_threshold=args.track_relative_threshold,
         min_separation_hz=args.min_separation_hz,
+        peak_min_separation_hz=args.peak_min_separation_hz,
+        track_match_hz=args.track_match_hz,
+        channel_merge_hz=args.channel_merge_hz,
         max_tracks=args.max_tracks,
         max_track_gap_s=args.max_track_gap_s,
         carrier_smoothing=args.carrier_smoothing,

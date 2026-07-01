@@ -74,3 +74,16 @@ def test_channel_registry_finalizes_session_and_starts_clean_next_session() -> N
     assert second_active is not None
     assert second_active.session_id == 2
     assert [(event.kind, event.session_id) for event in session_events] == [("SESSION_STARTED", 2)]
+
+
+def test_channel_registry_uses_channel_merge_width_for_reacquisition() -> None:
+    from cw.stream_models import StreamingConfig
+    from cw.stream_state import ChannelRegistry
+
+    registry = ChannelRegistry(StreamingConfig(channel_merge_hz=100.0, bandwidth_hz=20.0))
+    first = registry.channel_for(700.0, 0.0)
+    same = registry.channel_for(745.0, 1.0)
+    other = registry.channel_for(760.0, 2.0)
+
+    assert same.track_id == first.track_id
+    assert other.track_id != first.track_id

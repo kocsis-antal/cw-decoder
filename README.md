@@ -154,13 +154,47 @@ keys are `freq` and `text`. Useful optional keys are `id`, `preset`, `start`,
 `amplitude`, `wpm`, `seed`, and the same distortion keys supported by the
 single-source generator, for example `frequency_drift_hz` or `amplitude_fade`.
 
+## Carrier spacing benchmark
+
+The spacing benchmark generates two overlapping CW sources at controlled audio
+frequency offsets and runs the streaming tracker on each case. It is meant to
+answer questions such as: below what spacing should two tones be treated as one
+crowded channel, and from what spacing can two parallel transmissions be decoded
+separately?
+
+```bash
+docker compose -f infra/compose.yml run --rm cw python -m cw.cli spacing-benchmark --expect
+```
+
+Default expectations are intentionally conservative:
+
+```text
+40 Hz          merge / not reliably separable
+60-80 Hz       ambiguous observation zone
+100 Hz and up  should split and decode both sources
+```
+
+The benchmark uses a longer stream FFT frame by default (`--stream-frame-ms 80`)
+because carrier spacing needs better frequency resolution than fast Morse edge
+timing. The normal `stream-sim` defaults remain more time-resolution oriented.
+Useful knobs are `--deltas`, `--merge-below-hz`, `--split-from-hz`,
+`--stream-frame-ms`, and `--stream-hop-ms`. Tracker spacing can now be tuned
+with separate thresholds: `--peak-min-separation-hz` controls how close two FFT
+peaks may be before one suppresses the other, `--track-match-hz` controls how far
+a peak may move frame-to-frame and still match an existing carrier track, and
+`--channel-merge-hz` controls how close final carrier candidates may be before
+they are treated as the same channel. `--min-separation-hz` remains the legacy
+default used when these more specific values are omitted.
+
 ## Streaming simulation
 
 `stream-sim` does not split the WAV into separate files. It reads the audio as a
 continuous sample stream, feeds it into an internal ring-buffer-like STFT, and
-produces overlapping FFT frames. Carrier detection and decoding are updated from
-the accumulated frame history, which is the first step toward replacing the WAV
-input with a microphone input later.
+produces overlapping FFT frames. Carrier detection is now frame-by-frame: each overlapping FFT frame yields
+spectral peaks, a lightweight tracker links those peaks into smoothed carrier
+tracks, and each active carrier track drives its own channel/session decode. The
+retained frame history is still used to decode the current session, which keeps
+the WAV replay deterministic while moving the internals toward microphone input.
 
 ```bash
 docker compose -f infra/compose.yml run --rm cw python -m cw.cli stream-sim samples/generated/two_sources.wav
@@ -211,12 +245,13 @@ The streaming code is split into a few focused modules:
 stream_models.py  public stream dataclasses and configuration validation
 stream_stft.py    incremental overlapping STFT over a continuous sample stream
 stream_decode.py  carrier/session decoding helpers from retained FFT frames
+stream_tracker.py frame-by-frame spectral peak tracking into carrier tracks
 stream_state.py   mutable ChannelState/SessionState lifecycle and commit bookkeeping
 streaming.py      stream orchestration and pruning
 ```
 
 
-The mutable live state is now explicit: `ChannelState` is the long-lived carrier/GUI anchor, while `SessionState` owns the current transmission's committed prefix and start/final bookkeeping. Decoded tempo/unit values still come from each `StreamSessionResult`, so a later reply on the same channel starts with a clean session-level timing estimate instead of inheriting the previous operator's tempo.
+The tracker keeps smoothed carrier estimates, marks tracks dormant after `--max-track-gap-s`, and filters long-term weak sidebands/noise through `--track-relative-threshold`. Peak separation, frame-to-frame track matching, and channel-level merging are separate configuration knobs, so experiments can distinguish "two spectral peaks", "same drifting carrier track", and "same GUI/logical channel". The mutable live state is explicit: `ChannelState` is the long-lived carrier/GUI anchor, while `SessionState` owns the current transmission's committed prefix and start/final bookkeeping. Decoded tempo/unit values still come from each `StreamSessionResult`, so a later reply on the same channel starts with a clean session-level timing estimate instead of inheriting the previous operator's tempo.
 
 `cw.streaming` still re-exports the public stream API, so existing imports such
 as `from cw.streaming import StreamingConfig, StreamingSTFT` continue to work.

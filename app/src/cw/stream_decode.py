@@ -14,7 +14,7 @@ from cw.decoder import (
 from cw.morse_table import decode_tokens
 from cw.multi_decoder import _local_peak_indices
 from cw.quality import score_decode_result
-from cw.stream_models import SpectrumFrame, StreamingConfig, StreamSessionResult
+from cw.stream_models import SpectrumFrame, StreamingConfig, StreamSessionResult, peak_min_separation_hz
 
 
 def detect_accumulated_carriers(
@@ -48,7 +48,7 @@ def detect_accumulated_carriers(
         if relative_power < config.peak_relative_threshold:
             continue
         frequency_hz = float(search_freqs[index])
-        if any(abs(frequency_hz - existing_hz) < config.min_separation_hz for existing_hz, _r, _p in selected):
+        if any(abs(frequency_hz - existing_hz) < peak_min_separation_hz(config) for existing_hz, _r, _p in selected):
             continue
         selected.append((frequency_hz, relative_power, power))
         if len(selected) >= config.max_tracks:

@@ -21,15 +21,18 @@ from cw.stream_models import (
     StreamSimulationResult,
     StreamTrackResult,
     StreamUpdate,
+    channel_match_hz,
     validate_streaming_config,
 )
 from cw.stream_stft import StreamingSTFT
+from cw.stream_tracker import CarrierTracker
 
 __all__ = [
     "SpectrumFrame",
     "StreamEvent",
     "StreamingConfig",
     "StreamingSTFT",
+    "CarrierTracker",
     "StreamSessionResult",
     "StreamSimulationResult",
     "StreamTrackResult",
@@ -52,6 +55,7 @@ def simulate_stream(signal: np.ndarray, sample_rate: int, config: StreamingConfi
 
     stft = StreamingSTFT(sample_rate, config.frame_ms, config.hop_ms)
     registry = ChannelRegistry(config)
+    tracker = CarrierTracker(config)
     frames: list[SpectrumFrame] = []
     updates: list[StreamUpdate] = []
     events: list[StreamEvent] = []
@@ -65,10 +69,17 @@ def simulate_stream(signal: np.ndarray, sample_rate: int, config: StreamingConfi
         for frame in stft.push(block):
             frames.append(frame)
             frames_processed += 1
+            tracker.update(frame)
             if frame.start_s - last_emit_s < config.emit_interval_s:
                 continue
             last_emit_s = frame.start_s
-            new_updates = _updates_from_frames(frames, registry, frame.start_s, config)
+            new_updates = _updates_from_frames(
+                frames,
+                registry,
+                frame.start_s,
+                config,
+                tracker.candidate_carriers(frame.start_s),
+            )
             events.extend(registry.pop_pending_events())
             updates.extend(new_updates)
             events.extend(_events_from_updates(new_updates))
@@ -77,7 +88,13 @@ def simulate_stream(signal: np.ndarray, sample_rate: int, config: StreamingConfi
                 pruned_frames += dropped_count
 
     duration_s = len(signal) / sample_rate if sample_rate else 0.0
-    tracks = _final_tracks_from_frames(frames, registry, config, duration_s)
+    tracks = _final_tracks_from_frames(
+        frames,
+        registry,
+        config,
+        duration_s,
+        tracker.candidate_carriers(duration_s),
+    )
     events.extend(registry.pop_pending_events())
     events.extend(_final_events_from_tracks(tracks, registry, duration_s, config))
     return StreamSimulationResult(
@@ -113,9 +130,11 @@ def _updates_from_frames(
     registry: ChannelRegistry,
     time_s: float,
     config: StreamingConfig,
+    carriers: list[tuple[float, float, float]] | None = None,
 ) -> list[StreamUpdate]:
     updates: list[StreamUpdate] = []
-    for carrier_hz, _relative_power, _power in detect_accumulated_carriers(frames, config):
+    candidates = carriers if carriers is not None else detect_accumulated_carriers(frames, config)
+    for carrier_hz, _relative_power, _power in candidates:
         track = registry.channel_for(carrier_hz, time_s)
         sessions = decode_carrier_sessions_from_frames(frames, track.carrier_hz, config, time_s)
         active_session = registry.sync_sessions(track, sessions)
@@ -159,10 +178,12 @@ def _final_tracks_from_frames(
     registry: ChannelRegistry,
     config: StreamingConfig,
     final_time_s: float,
+    carriers: list[tuple[float, float, float]] | None = None,
 ) -> list[StreamTrackResult]:
     active_sessions_by_track_id: dict[int, StreamSessionResult] = {}
 
-    for carrier_hz, _relative_power, _power in detect_accumulated_carriers(frames, config):
+    candidates = _merge_final_carriers(registry, carriers if carriers is not None else detect_accumulated_carriers(frames, config))
+    for carrier_hz, _relative_power, _power in candidates:
         track = registry.channel_for(carrier_hz, final_time_s)
         sessions = decode_carrier_sessions_from_frames(
             frames,
@@ -203,6 +224,18 @@ def _final_tracks_from_frames(
         )
     results.sort(key=lambda result: (result.track_id, result.quality.score))
     return results
+
+
+def _merge_final_carriers(
+    registry: ChannelRegistry,
+    carriers: list[tuple[float, float, float]],
+) -> list[tuple[float, float, float]]:
+    merged: list[tuple[float, float, float]] = list(carriers)
+    for channel in registry.channels:
+        if any(abs(channel.carrier_hz - carrier_hz) <= channel_match_hz(registry.config) for carrier_hz, _r, _p in merged):
+            continue
+        merged.append((channel.carrier_hz, 0.0, 0.0))
+    return merged
 
 
 def _combined_decode_from_sessions(sessions: list[StreamSessionResult], carrier_hz: float) -> DecodeResult:
