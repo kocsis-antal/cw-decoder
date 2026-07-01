@@ -202,6 +202,25 @@ can be checked during experiments. Use `--no-prune-finalized-sessions` when you
 want full-history debug behaviour. `--history-margin-s` controls the small
 safety overlap kept before the active session.
 
+
+### Streaming core layout
+
+The streaming code is split into a few focused modules:
+
+```text
+stream_models.py  public stream dataclasses and configuration validation
+stream_stft.py    incremental overlapping STFT over a continuous sample stream
+stream_decode.py  carrier/session decoding helpers from retained FFT frames
+stream_state.py   mutable ChannelState/SessionState lifecycle and commit bookkeeping
+streaming.py      stream orchestration and pruning
+```
+
+
+The mutable live state is now explicit: `ChannelState` is the long-lived carrier/GUI anchor, while `SessionState` owns the current transmission's committed prefix and start/final bookkeeping. Decoded tempo/unit values still come from each `StreamSessionResult`, so a later reply on the same channel starts with a clean session-level timing estimate instead of inheriting the previous operator's tempo.
+
+`cw.streaming` still re-exports the public stream API, so existing imports such
+as `from cw.streaming import StreamingConfig, StreamingSTFT` continue to work.
+
 ## Contest-QSO scenario
 
 Generate a short contest-style exchange on one durable carrier channel. The two
