@@ -107,6 +107,25 @@ def main() -> None:
     generate_multi_parser.add_argument("--normalize-peak", type=float, default=0.95)
     generate_multi_parser.add_argument("--mix-noise-snr-db", type=float, default=None)
 
+    qso_parser = subparsers.add_parser("generate-qso")
+    qso_parser.add_argument("--out", type=Path, required=True)
+    qso_parser.add_argument("--caller", default="YU7NKA")
+    qso_parser.add_argument("--responder", default="YT7MK")
+    qso_parser.add_argument("--freq", type=float, default=700.0)
+    qso_parser.add_argument("--responder-offset-hz", type=float, default=6.0)
+    qso_parser.add_argument("--start", type=float, default=0.0)
+    qso_parser.add_argument("--turn-gap-s", type=float, default=1.6)
+    qso_parser.add_argument("--caller-preset", default="straight")
+    qso_parser.add_argument("--responder-preset", default="straight")
+    qso_parser.add_argument("--caller-wpm", type=float, default=20.0)
+    qso_parser.add_argument("--responder-wpm", type=float, default=18.0)
+    qso_parser.add_argument("--caller-amplitude", type=float, default=0.60)
+    qso_parser.add_argument("--responder-amplitude", type=float, default=0.50)
+    qso_parser.add_argument("--sample-rate", type=int, default=8000)
+    qso_parser.add_argument("--seed", type=int, default=123)
+    qso_parser.add_argument("--normalize-peak", type=float, default=0.95)
+    qso_parser.add_argument("--mix-noise-snr-db", type=float, default=None)
+
     detect_carriers_parser = subparsers.add_parser("detect-carriers")
     detect_carriers_parser.add_argument("wav_path", type=Path)
     _add_carrier_detection_options(detect_carriers_parser)
@@ -120,6 +139,82 @@ def main() -> None:
     contest_live_multi_parser.add_argument("--top", type=int, default=5)
     contest_live_multi_parser.add_argument("--consensus-top", type=int, default=3)
     _add_carrier_detection_options(contest_live_multi_parser)
+
+    stream_sim_parser = subparsers.add_parser("stream-sim")
+    stream_sim_parser.add_argument("wav_path", type=Path)
+    stream_sim_parser.add_argument("--input-block-ms", type=float, default=10.0)
+    stream_sim_parser.add_argument("--frame-ms", type=float, default=30.0)
+    stream_sim_parser.add_argument("--hop-ms", type=float, default=5.0)
+    stream_sim_parser.add_argument("--tracker-frame-ms", type=float, default=None)
+    stream_sim_parser.add_argument("--tracker-hop-ms", type=float, default=None)
+    stream_sim_parser.add_argument("--min-tone-hz", type=float, default=200.0)
+    stream_sim_parser.add_argument("--max-tone-hz", type=float, default=2000.0)
+    stream_sim_parser.add_argument("--bandwidth-hz", type=float, default=40.0)
+    stream_sim_parser.add_argument("--threshold-ratio", type=float, default=0.35)
+    stream_sim_parser.add_argument("--peak-relative-threshold", type=float, default=0.25)
+    stream_sim_parser.add_argument("--track-relative-threshold", type=float, default=0.10)
+    stream_sim_parser.add_argument("--min-separation-hz", type=float, default=80.0)
+    stream_sim_parser.add_argument("--peak-min-separation-hz", type=float, default=None)
+    stream_sim_parser.add_argument("--track-match-hz", type=float, default=None)
+    stream_sim_parser.add_argument("--channel-merge-hz", type=float, default=None)
+    stream_sim_parser.add_argument("--max-tracks", type=int, default=5)
+    stream_sim_parser.add_argument("--max-track-gap-s", type=float, default=2.0)
+    stream_sim_parser.add_argument("--carrier-smoothing", type=float, default=0.20)
+    stream_sim_parser.add_argument("--min-track-hits", type=int, default=2)
+    stream_sim_parser.add_argument("--emit-interval-s", type=float, default=0.50)
+    stream_sim_parser.add_argument("--min-update-score", type=float, default=25.0)
+    stream_sim_parser.add_argument("--max-final-score", type=float, default=30.0)
+    stream_sim_parser.add_argument("--disable-final-quality-filter", action="store_true")
+    stream_sim_parser.add_argument("--shadow-suppression-hz", type=float, default=None)
+    stream_sim_parser.add_argument("--shadow-score-margin", type=float, default=15.0)
+    stream_sim_parser.add_argument("--session-gap-units", type=float, default=20.0)
+    stream_sim_parser.add_argument("--min-session-gap-s", type=float, default=1.20)
+    stream_sim_parser.add_argument("--history-margin-s", type=float, default=0.25)
+    stream_sim_parser.add_argument("--active-history-margin-s", type=float, default=None)
+    stream_sim_parser.add_argument("--no-prune-finalized-sessions", action="store_true")
+    stream_sim_parser.add_argument("--prune-committed-active-sessions", action="store_true")
+    stream_sim_parser.add_argument("--raw-updates", action="store_true")
+    stream_sim_parser.add_argument("--updates", type=int, default=20)
+    stream_sim_parser.add_argument("--events", action="store_true", help="Print channel/session lifecycle events")
+    stream_sim_parser.add_argument("--json-events", action="store_true", help="Print channel/session lifecycle events as JSON Lines and suppress human tables")
+
+    spacing_parser = subparsers.add_parser("spacing-benchmark")
+    spacing_parser.add_argument("--text-a", default="CQ CQ DE YU7NKA")
+    spacing_parser.add_argument("--text-b", default="CQ CQ DE YT7MK")
+    spacing_parser.add_argument("--out-dir", type=Path, default=Path("samples/spacing"))
+    spacing_parser.add_argument("--base-freq", type=float, default=700.0)
+    spacing_parser.add_argument("--deltas", default="40,60,80,100,120,150")
+    spacing_parser.add_argument("--merge-below-hz", type=float, default=60.0)
+    spacing_parser.add_argument("--split-from-hz", type=float, default=100.0)
+    spacing_parser.add_argument("--preset-a", default="field")
+    spacing_parser.add_argument("--preset-b", default="straight")
+    spacing_parser.add_argument("--wpm-a", type=float, default=20.0)
+    spacing_parser.add_argument("--wpm-b", type=float, default=18.0)
+    spacing_parser.add_argument("--amplitude-a", type=float, default=0.60)
+    spacing_parser.add_argument("--amplitude-b", type=float, default=0.45)
+    spacing_parser.add_argument("--start-b", type=float, default=0.40)
+    spacing_parser.add_argument("--sample-rate", type=int, default=8000)
+    spacing_parser.add_argument("--seed", type=int, default=123)
+    spacing_parser.add_argument("--normalize-peak", type=float, default=0.95)
+    spacing_parser.add_argument("--mix-noise-snr-db", type=float, default=None)
+    spacing_parser.add_argument("--stream-frame-ms", type=float, default=30.0)
+    spacing_parser.add_argument("--stream-hop-ms", type=float, default=5.0)
+    spacing_parser.add_argument("--tracker-frame-ms", type=float, default=80.0)
+    spacing_parser.add_argument("--tracker-hop-ms", type=float, default=10.0)
+    spacing_parser.add_argument("--stream-bandwidth-hz", type=float, default=40.0)
+    spacing_parser.add_argument("--stream-threshold-ratio", type=float, default=0.35)
+    spacing_parser.add_argument("--peak-relative-threshold", type=float, default=0.25)
+    spacing_parser.add_argument("--track-relative-threshold", type=float, default=0.10)
+    spacing_parser.add_argument("--max-final-score", type=float, default=30.0)
+    spacing_parser.add_argument("--disable-final-quality-filter", action="store_true")
+    spacing_parser.add_argument("--shadow-suppression-hz", type=float, default=None)
+    spacing_parser.add_argument("--shadow-score-margin", type=float, default=15.0)
+    spacing_parser.add_argument("--min-separation-hz", type=float, default=80.0)
+    spacing_parser.add_argument("--peak-min-separation-hz", type=float, default=None)
+    spacing_parser.add_argument("--track-match-hz", type=float, default=None)
+    spacing_parser.add_argument("--channel-merge-hz", type=float, default=None)
+    spacing_parser.add_argument("--max-tracks", type=int, default=5)
+    spacing_parser.add_argument("--expect", action="store_true")
 
     args = parser.parse_args()
 
@@ -380,6 +475,36 @@ def main() -> None:
         print(f"sources={result.source_count}")
         print(f"duration_s={result.duration_s:.3f}")
         print(f"normalized_gain={result.normalized_gain:.3f}")
+    elif args.command == "generate-qso":
+        from cw.qso_generator import ContestQsoConfig, write_contest_qso_sample
+
+        config = ContestQsoConfig(
+            caller_call=args.caller,
+            responder_call=args.responder,
+            base_frequency_hz=args.freq,
+            responder_offset_hz=args.responder_offset_hz,
+            start_s=args.start,
+            turn_gap_s=args.turn_gap_s,
+            caller_preset=args.caller_preset,
+            responder_preset=args.responder_preset,
+            caller_wpm=args.caller_wpm,
+            responder_wpm=args.responder_wpm,
+            caller_amplitude=args.caller_amplitude,
+            responder_amplitude=args.responder_amplitude,
+            sample_rate=args.sample_rate,
+            seed=args.seed,
+        )
+        result = write_contest_qso_sample(
+            args.out,
+            config,
+            normalize_peak=args.normalize_peak,
+            mix_noise_snr_db=args.mix_noise_snr_db,
+        )
+        print(f"Wrote {result.wav_path}")
+        print(f"Wrote {result.label_path}")
+        print(f"sources={result.source_count}")
+        print(f"duration_s={result.duration_s:.3f}")
+        print(f"normalized_gain={result.normalized_gain:.3f}")
     elif args.command == "detect-carriers":
         from cw.multi_decoder import detect_carriers
 
@@ -405,26 +530,28 @@ def main() -> None:
         )
         results = run_multi_live_contest(args.wav_path, grid, _carrier_detection_config(args))
         print(f"carriers={len(results)}")
-        print("source carrier_hz rel_power best_score consensus_share frame hop bandwidth threshold unit text")
         for result in results:
             best_consensus = result.best_consensus
             config = best_consensus.best_config
             decoded = best_consensus.best_decoded
+            print()
             print(
-                f"{result.rank:>6} "
-                f"{result.carrier.frequency_hz:>10.1f} "
-                f"{result.carrier.relative_power:>9.3f} "
-                f"{best_consensus.best_score:>10.1f} "
-                f"{best_consensus.share:>15.1%} "
-                f"{config.frame_ms:>5.1f} "
-                f"{config.hop_ms:>3.1f} "
-                f"{config.bandwidth_hz:>9.1f} "
-                f"{config.threshold_ratio:>9.2f} "
-                f"{decoded.unit_s:>4.3f} "
-                f"{_display_text(best_consensus.text)}"
+                f"source={result.rank} "
+                f"carrier_hz={result.carrier.frequency_hz:.1f} "
+                f"rel_power={result.carrier.relative_power:.3f} "
+                f"best_score={best_consensus.best_score:.1f} "
+                f"consensus_share={best_consensus.share:.1%}"
             )
+            print(
+                f"best_config=frame:{config.frame_ms:g}ms "
+                f"hop:{config.hop_ms:g}ms "
+                f"bandwidth:{config.bandwidth_hz:g}Hz "
+                f"threshold:{config.threshold_ratio:g} "
+                f"unit:{decoded.unit_s:.3f}s"
+            )
+            print(f"text={_display_text(best_consensus.text)}")
             if args.top > 0:
-                print("  top:")
+                print("top:")
                 for live_result in result.live_results[: args.top]:
                     quality = live_result.quality
                     cfg = live_result.config
@@ -436,7 +563,7 @@ def main() -> None:
                         f"unit={dec.unit_s:.3f} text={_display_text(dec.text)}"
                     )
             if args.consensus_top > 0:
-                print("  consensus:")
+                print("consensus:")
                 for consensus in result.consensus[: args.consensus_top]:
                     print(
                         f"  {consensus.rank:>4} "
@@ -444,6 +571,149 @@ def main() -> None:
                         f"share={consensus.share:>6.1%} "
                         f"score={consensus.best_score:>6.1f} "
                         f"text={_display_text(consensus.text)}"
+                    )
+    elif args.command == "spacing-benchmark":
+        from cw.spacing_benchmark import (
+            SpacingBenchmarkConfig,
+            check_spacing_expectations,
+            parse_float_list as parse_spacing_float_list,
+            run_spacing_benchmark,
+        )
+
+        spacing_config = SpacingBenchmarkConfig(
+            base_frequency_hz=args.base_freq,
+            deltas_hz=parse_spacing_float_list(args.deltas),
+            merge_below_hz=args.merge_below_hz,
+            split_from_hz=args.split_from_hz,
+            source_a_preset=args.preset_a,
+            source_b_preset=args.preset_b,
+            source_a_wpm=args.wpm_a,
+            source_b_wpm=args.wpm_b,
+            source_a_amplitude=args.amplitude_a,
+            source_b_amplitude=args.amplitude_b,
+            source_b_start_s=args.start_b,
+            sample_rate=args.sample_rate,
+            seed=args.seed,
+            normalize_peak=args.normalize_peak,
+            mix_noise_snr_db=args.mix_noise_snr_db,
+            stream_frame_ms=args.stream_frame_ms,
+            stream_hop_ms=args.stream_hop_ms,
+            tracker_frame_ms=args.tracker_frame_ms,
+            tracker_hop_ms=args.tracker_hop_ms,
+            stream_bandwidth_hz=args.stream_bandwidth_hz,
+            stream_threshold_ratio=args.stream_threshold_ratio,
+            peak_relative_threshold=args.peak_relative_threshold,
+            track_relative_threshold=args.track_relative_threshold,
+            max_final_score=None if args.disable_final_quality_filter else args.max_final_score,
+            shadow_suppression_hz=args.shadow_suppression_hz,
+            shadow_score_margin=args.shadow_score_margin,
+            min_separation_hz=args.min_separation_hz,
+            peak_min_separation_hz=args.peak_min_separation_hz,
+            track_match_hz=args.track_match_hz,
+            channel_merge_hz=args.channel_merge_hz,
+            max_tracks=args.max_tracks,
+        )
+        results = run_spacing_benchmark(args.text_a, args.text_b, args.out_dir, spacing_config)
+        print(f"cases={len(results)}")
+        print(
+            "delta_hz expected result channels carriers source_a_ok source_b_ok texts"
+        )
+        for result in results:
+            carrier_text = ",".join(f"{carrier:.1f}" for carrier in result.carriers_hz) or "-"
+            decoded_text = " || ".join(_display_text(text) for text in result.decoded_texts) or "<none>"
+            print(
+                f"{result.delta_hz:>8.1f} "
+                f"{result.expected:<9} "
+                f"{result.result_label:<6} "
+                f"{result.detected_channels:>8} "
+                f"{carrier_text:<16} "
+                f"{str(result.source_a_ok):>11} "
+                f"{str(result.source_b_ok):>11} "
+                f"{decoded_text}"
+            )
+        if args.expect:
+            expectation = check_spacing_expectations(results)
+            print(f"expectation_passed={expectation.passed}")
+            for failure in expectation.failures:
+                print(f"expectation_failure={failure}")
+            if not expectation.passed:
+                sys.exit(1)
+    elif args.command == "stream-sim":
+        from cw.streaming import simulate_stream_from_wav
+
+        result = simulate_stream_from_wav(args.wav_path, _streaming_config(args))
+        if args.json_events:
+            from cw.stream_events import stream_result_events_to_jsonl
+
+            jsonl = stream_result_events_to_jsonl(result)
+            if jsonl:
+                print(jsonl)
+            return
+
+        print(f"duration_s={result.duration_s:.3f}")
+        print(
+            f"frames_processed={result.frames_processed} "
+            f"tracker_frames_processed={result.tracker_frames_processed} "
+            f"retained_frames={result.retained_frames} "
+            f"pruned_frames={result.pruned_frames} "
+            f"active_pruned_frames={result.active_pruned_frames} "
+            f"finalized_pruned_frames={result.finalized_pruned_frames}"
+        )
+        print(f"updates={len(result.updates)}")
+        for update in result.updates[: args.updates]:
+            print(
+                f"t={update.time_s:>7.3f}s "
+                f"track={update.track_id:<2} "
+                f"session={update.session_id:<2} "
+                f"carrier={update.carrier_hz:>7.1f}Hz "
+                f"score={update.score:>6.1f} "
+                f"text={_display_text(update.text)}"
+            )
+        if len(result.updates) > args.updates:
+            print(f"... {len(result.updates) - args.updates} more updates")
+        if args.events:
+            print("events:")
+            for event in result.events:
+                session = "-" if event.session_id is None else str(event.session_id)
+                reason = f" reason={event.reason}" if event.reason else ""
+                text = f" text={_display_text(event.text)}" if event.text else ""
+                score = f" score={event.score:.1f}" if event.score else ""
+                print(
+                    f"t={event.time_s:>7.3f}s "
+                    f"channel={event.channel_id:<2} "
+                    f"session={session:<2} "
+                    f"carrier={event.carrier_hz:>7.1f}Hz "
+                    f"kind={event.kind}"
+                    f"{score}{reason}{text}"
+                )
+        print("final:")
+        print("track carrier_hz first_seen last_seen hits score unit text")
+        for track in result.tracks:
+            print(
+                f"{track.track_id:>5} "
+                f"{track.carrier_hz:>10.1f} "
+                f"{track.first_seen_s:>10.3f} "
+                f"{track.last_seen_s:>9.3f} "
+                f"{track.hits:>4} "
+                f"{track.quality.score:>5.1f} "
+                f"{track.decoded.unit_s:>4.3f} "
+                f"{_display_track_text(track)}"
+            )
+        if _has_multiple_sessions(result.tracks) or args.events:
+            print("sessions:")
+            print("channel session first last final reason score unit text")
+            for track in result.tracks:
+                for session in track.sessions:
+                    print(
+                        f"{track.track_id:>7} "
+                        f"{session.session_id:>7} "
+                        f"{session.first_seen_s:>5.3f} "
+                        f"{session.last_seen_s:>5.3f} "
+                        f"{session.final_time_s:>5.3f} "
+                        f"{session.final_reason:<13} "
+                        f"{session.quality.score:>5.1f} "
+                        f"{session.decoded.unit_s:>4.3f} "
+                        f"{_display_text(session.decoded.text)}"
                     )
 
 
@@ -493,6 +763,44 @@ def _decoder_config(args: argparse.Namespace):
     )
 
 
+def _streaming_config(args: argparse.Namespace):
+    from cw.streaming import StreamingConfig
+
+    return StreamingConfig(
+        input_block_ms=args.input_block_ms,
+        frame_ms=args.frame_ms,
+        hop_ms=args.hop_ms,
+        tracker_frame_ms=args.tracker_frame_ms,
+        tracker_hop_ms=args.tracker_hop_ms,
+        min_tone_hz=args.min_tone_hz,
+        max_tone_hz=args.max_tone_hz,
+        bandwidth_hz=args.bandwidth_hz,
+        threshold_ratio=args.threshold_ratio,
+        peak_relative_threshold=args.peak_relative_threshold,
+        track_relative_threshold=args.track_relative_threshold,
+        min_separation_hz=args.min_separation_hz,
+        peak_min_separation_hz=args.peak_min_separation_hz,
+        track_match_hz=args.track_match_hz,
+        channel_merge_hz=args.channel_merge_hz,
+        max_tracks=args.max_tracks,
+        max_track_gap_s=args.max_track_gap_s,
+        carrier_smoothing=args.carrier_smoothing,
+        min_track_hits=args.min_track_hits,
+        emit_interval_s=args.emit_interval_s,
+        stable_updates=not args.raw_updates,
+        min_update_score=args.min_update_score,
+        max_final_score=None if args.disable_final_quality_filter else args.max_final_score,
+        shadow_suppression_hz=args.shadow_suppression_hz,
+        shadow_score_margin=args.shadow_score_margin,
+        session_gap_units=args.session_gap_units,
+        min_session_gap_s=args.min_session_gap_s,
+        prune_finalized_sessions=not args.no_prune_finalized_sessions,
+        prune_committed_active_sessions=args.prune_committed_active_sessions,
+        history_margin_s=args.history_margin_s,
+        active_history_margin_s=args.active_history_margin_s,
+    )
+
+
 def _format_config(config) -> str:
     return (
         f"f{config.frame_ms:g}/h{config.hop_ms:g}/"
@@ -502,6 +810,19 @@ def _format_config(config) -> str:
 
 def _display_text(text: str) -> str:
     return text or "<empty>"
+
+
+def _display_track_text(track) -> str:
+    if getattr(track, "sessions", None) and len(track.sessions) > 1:
+        return " | ".join(
+            f"[{session.session_id}] {_display_text(session.decoded.text)}"
+            for session in track.sessions
+        )
+    return _display_text(track.decoded.text)
+
+
+def _has_multiple_sessions(tracks) -> bool:
+    return any(len(getattr(track, "sessions", [])) > 1 for track in tracks)
 
 
 if __name__ == "__main__":
