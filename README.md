@@ -166,14 +166,72 @@ input with a microphone input later.
 docker compose -f infra/compose.yml run --rm cw python -m cw.cli stream-sim samples/generated/two_sources.wav
 ```
 
-The output contains incremental `updates` and a final track table. By default,
-updates are stabilized: a partial text is printed only after it appears as a
-stable prefix in consecutive decoding snapshots and its quality score is below
-`--min-update-score`. This avoids most early half-letter guesses while still
-showing the text grow on the fly.
+The output contains incremental `updates` and a final track table. Each update
+includes the current session id, so a QSO turn change is visible while the text
+is still growing. By default, updates are stabilized: a partial text is printed
+only after it appears as a stable prefix in consecutive decoding snapshots and
+its quality score is below `--min-update-score`. This avoids most early
+half-letter guesses while still showing the text grow on the fly.
 
 For debugging the raw, unstable candidates, use:
 
 ```bash
 docker compose -f infra/compose.yml run --rm cw python -m cw.cli stream-sim samples/generated/two_sources.wav --raw-updates
 ```
+
+Print channel/session lifecycle events:
+
+```bash
+docker compose -f infra/compose.yml run --rm cw python -m cw.cli stream-sim samples/generated/two_sources.wav --events
+```
+
+The event stream separates a durable carrier channel from a concrete transmission
+session. A channel can become dormant and still remain useful for a GUI card,
+while each session has its own final text and its own decoded unit/tempo. Long
+silence inside one carrier can split the final result into multiple sessions.
+The split threshold is controlled by `--session-gap-units` and
+`--min-session-gap-s`. When a track has more than one session, the final track
+summary uses `|` separators and a `sessions:` table is printed so separate QSO
+overs do not collapse into one unreadable line.
+
+By default, finalized session frame history is pruned from the rolling stream
+state. The channel keeps the finalized session text and metadata, but the old
+FFT frames no longer have to be decoded again on every update. The `stream-sim`
+header prints `frames_processed`, `retained_frames`, and `pruned_frames` so this
+can be checked during experiments. Use `--no-prune-finalized-sessions` when you
+want full-history debug behaviour. `--history-margin-s` controls the small
+safety overlap kept before the active session.
+
+## Contest-QSO scenario
+
+Generate a short contest-style exchange on one durable carrier channel. The two
+operators use slightly different audio tones and different speeds, but the tones
+are close enough that the streaming tracker should keep them on one channel and
+split the overs into separate sessions after long silence:
+
+```bash
+docker compose -f infra/compose.yml run --rm cw python -m cw.cli generate-qso \
+  --out samples/generated/qso.wav \
+  --caller YU7NKA \
+  --responder YT7MK
+```
+
+Then inspect the live/session behaviour:
+
+```bash
+docker compose -f infra/compose.yml run --rm cw python -m cw.cli stream-sim samples/generated/qso.wav --events
+```
+
+The expected final sessions are roughly:
+
+```text
+CQ TEST YU7NKA
+YU7NKA YT7MK
+YT7MK 599 001
+TU 599 002
+TU
+```
+
+You can make it harsher with the same streaming path by changing presets, adding
+mix noise, or running two generated QSOs in parallel with `generate-multi` or the
+`qso_generator` helpers used by the tests.

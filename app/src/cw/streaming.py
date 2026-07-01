@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -40,15 +40,45 @@ class StreamingConfig:
     emit_interval_s: float = 0.50
     stable_updates: bool = True
     min_update_score: float = 25.0
+    session_gap_units: float = 20.0
+    min_session_gap_s: float = 1.20
+    final_event_reason: str = "end_of_stream"
+    prune_finalized_sessions: bool = True
+    history_margin_s: float = 0.25
 
 
 @dataclass(frozen=True)
 class StreamUpdate:
     time_s: float
     track_id: int
+    session_id: int
     carrier_hz: float
     score: float
     text: str
+
+
+@dataclass(frozen=True)
+class StreamEvent:
+    time_s: float
+    kind: str
+    channel_id: int
+    session_id: int | None
+    carrier_hz: float
+    text: str = ""
+    score: float = 0.0
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class StreamSessionResult:
+    session_id: int
+    first_seen_s: float
+    last_seen_s: float
+    hits: int
+    final_time_s: float
+    final_reason: str
+    quality: QualityScore
+    decoded: DecodeResult
 
 
 @dataclass(frozen=True)
@@ -60,6 +90,7 @@ class StreamTrackResult:
     hits: int
     quality: QualityScore
     decoded: DecodeResult
+    sessions: list[StreamSessionResult] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -67,6 +98,10 @@ class StreamSimulationResult:
     duration_s: float
     updates: list[StreamUpdate]
     tracks: list[StreamTrackResult]
+    events: list[StreamEvent]
+    frames_processed: int = 0
+    retained_frames: int = 0
+    pruned_frames: int = 0
 
 
 @dataclass(frozen=True)
@@ -255,29 +290,54 @@ def simulate_stream(signal: np.ndarray, sample_rate: int, config: StreamingConfi
     registry = _TrackRegistry(config)
     frames: list[SpectrumFrame] = []
     updates: list[StreamUpdate] = []
+    events: list[StreamEvent] = []
     last_emit_s = 0.0
+    frames_processed = 0
+    pruned_frames = 0
 
     block_length = max(1, round(sample_rate * config.input_block_ms / 1000))
     for start in range(0, len(signal), block_length):
         block = signal[start : start + block_length]
         for frame in stft.push(block):
             frames.append(frame)
+            frames_processed += 1
             if frame.start_s - last_emit_s < config.emit_interval_s:
                 continue
             last_emit_s = frame.start_s
-            updates.extend(_updates_from_frames(frames, registry, frame.start_s, config))
+            new_updates = _updates_from_frames(frames, registry, frame.start_s, config)
+            events.extend(registry.pop_pending_events())
+            updates.extend(new_updates)
+            events.extend(_events_from_updates(new_updates))
+            if config.prune_finalized_sessions:
+                frames, dropped_count = _prune_finalized_frames(frames, registry, config)
+                pruned_frames += dropped_count
 
-    tracks = _final_tracks_from_frames(frames, registry, config)
     duration_s = len(signal) / sample_rate if sample_rate else 0.0
-    return StreamSimulationResult(duration_s=duration_s, updates=updates, tracks=tracks)
+    tracks = _final_tracks_from_frames(frames, registry, config, duration_s)
+    events.extend(registry.pop_pending_events())
+    events.extend(_final_events_from_tracks(tracks, registry, duration_s, config))
+    return StreamSimulationResult(
+        duration_s=duration_s,
+        updates=updates,
+        tracks=tracks,
+        events=events,
+        frames_processed=frames_processed,
+        retained_frames=len(frames),
+        pruned_frames=pruned_frames,
+    )
 
 
 @dataclass
 class _RegisteredTrack:
     track_id: int
     carrier_hz: float
+    session_id: int = 1
     last_candidate_text: str = ""
     last_emitted_text: str = ""
+    finalized_session_ids: set[int] = field(default_factory=set)
+    started_session_ids: set[int] = field(default_factory=set)
+    finalized_sessions: list[StreamSessionResult] = field(default_factory=list)
+    active_session_first_seen_s: float | None = None
 
 
 class _TrackRegistry:
@@ -285,8 +345,9 @@ class _TrackRegistry:
         self.config = config
         self._next_track_id = 1
         self._tracks: list[_RegisteredTrack] = []
+        self._pending_events: list[StreamEvent] = []
 
-    def track_for(self, carrier_hz: float) -> _RegisteredTrack:
+    def track_for(self, carrier_hz: float, time_s: float = 0.0) -> _RegisteredTrack:
         max_match_hz = max(self.config.min_separation_hz / 2, self.config.bandwidth_hz)
         candidates = [track for track in self._tracks if abs(track.carrier_hz - carrier_hz) <= max_match_hz]
         if candidates:
@@ -295,11 +356,159 @@ class _TrackRegistry:
             track.carrier_hz = (1 - smoothing) * track.carrier_hz + smoothing * carrier_hz
             return track
 
-        track = _RegisteredTrack(track_id=self._next_track_id, carrier_hz=carrier_hz)
+        track = _RegisteredTrack(track_id=self._next_track_id, carrier_hz=carrier_hz, started_session_ids={1})
         self._tracks.append(track)
         self._next_track_id += 1
+        self._pending_events.extend(
+            [
+                StreamEvent(
+                    time_s=round(time_s, 3),
+                    kind="CHANNEL_STARTED",
+                    channel_id=track.track_id,
+                    session_id=None,
+                    carrier_hz=round(carrier_hz, 3),
+                ),
+                StreamEvent(
+                    time_s=round(time_s, 3),
+                    kind="SESSION_STARTED",
+                    channel_id=track.track_id,
+                    session_id=track.session_id,
+                    carrier_hz=round(carrier_hz, 3),
+                ),
+            ]
+        )
         return track
 
+    @property
+    def tracks(self) -> list[_RegisteredTrack]:
+        return self._tracks
+
+    def sync_sessions(self, track: _RegisteredTrack, sessions: list[StreamSessionResult]) -> StreamSessionResult | None:
+        active_session: StreamSessionResult | None = None
+        track.active_session_first_seen_s = None
+
+        for session in sessions:
+            existing = self._matching_finalized_session(track, session)
+            if existing is not None:
+                track.session_id = max(track.session_id, existing.session_id + 1)
+                continue
+
+            session = self._with_current_session_id(track, session)
+            self._ensure_session_started(track, session)
+
+            if session.final_reason == "silence_gap":
+                self._finalize_session(track, session)
+            elif session.final_reason == self.config.final_event_reason:
+                active_session = session
+                track.active_session_first_seen_s = session.first_seen_s
+
+        return active_session
+
+    def _with_current_session_id(
+        self, track: _RegisteredTrack, session: StreamSessionResult
+    ) -> StreamSessionResult:
+        return replace(session, session_id=track.session_id)
+
+    def _ensure_session_started(self, track: _RegisteredTrack, session: StreamSessionResult) -> None:
+        if session.session_id in track.started_session_ids:
+            return
+        self._pending_events.append(
+            StreamEvent(
+                time_s=round(session.first_seen_s, 3),
+                kind="SESSION_STARTED",
+                channel_id=track.track_id,
+                session_id=session.session_id,
+                carrier_hz=round(track.carrier_hz, 3),
+            )
+        )
+        track.started_session_ids.add(session.session_id)
+        track.last_candidate_text = ""
+        track.last_emitted_text = ""
+
+    def _matching_finalized_session(
+        self, track: _RegisteredTrack, session: StreamSessionResult
+    ) -> StreamSessionResult | None:
+        tolerance_s = max(self.config.hop_ms / 1000 * 3, 0.03)
+        for existing in track.finalized_sessions:
+            if (
+                abs(existing.first_seen_s - session.first_seen_s) <= tolerance_s
+                and abs(existing.last_seen_s - session.last_seen_s) <= tolerance_s
+                and existing.decoded.text == session.decoded.text
+            ):
+                return existing
+        return None
+
+    def _finalize_session(self, track: _RegisteredTrack, session: StreamSessionResult) -> None:
+        if session.session_id in track.finalized_session_ids:
+            return
+        self._pending_events.append(
+            StreamEvent(
+                time_s=round(session.final_time_s, 3),
+                kind="SESSION_FINAL",
+                channel_id=track.track_id,
+                session_id=session.session_id,
+                carrier_hz=round(track.carrier_hz, 3),
+                text=session.decoded.text,
+                score=session.quality.score,
+                reason=session.final_reason,
+            )
+        )
+        track.finalized_session_ids.add(session.session_id)
+        track.finalized_sessions.append(session)
+        track.finalized_sessions.sort(key=lambda item: item.session_id)
+        if track.session_id <= session.session_id:
+            track.session_id = session.session_id + 1
+            track.active_session_first_seen_s = None
+            track.last_candidate_text = ""
+            track.last_emitted_text = ""
+
+    def prune_before_s(self) -> float | None:
+        active_starts = [
+            track.active_session_first_seen_s
+            for track in self._tracks
+            if track.active_session_first_seen_s is not None
+        ]
+        if active_starts:
+            return min(active_starts)
+
+        finalized_times = [
+            session.final_time_s
+            for track in self._tracks
+            for session in track.finalized_sessions
+        ]
+        if finalized_times:
+            return max(finalized_times)
+        return None
+
+    def track_by_id(self, track_id: int) -> _RegisteredTrack | None:
+        for track in self._tracks:
+            if track.track_id == track_id:
+                return track
+        return None
+
+    def pop_pending_events(self) -> list[StreamEvent]:
+        events = self._pending_events
+        self._pending_events = []
+        return events
+
+
+
+def _prune_finalized_frames(
+    frames: list[SpectrumFrame],
+    registry: _TrackRegistry,
+    config: StreamingConfig,
+) -> tuple[list[SpectrumFrame], int]:
+    prune_before_s = registry.prune_before_s()
+    if prune_before_s is None:
+        return frames, 0
+
+    keep_from_s = max(0.0, prune_before_s - config.history_margin_s)
+    first_keep_index = 0
+    while first_keep_index < len(frames) and frames[first_keep_index].start_s < keep_from_s:
+        first_keep_index += 1
+    if first_keep_index <= 0:
+        return frames, 0
+    return frames[first_keep_index:], first_keep_index
 
 def _updates_from_frames(
     frames: list[SpectrumFrame],
@@ -309,18 +518,20 @@ def _updates_from_frames(
 ) -> list[StreamUpdate]:
     updates: list[StreamUpdate] = []
     for carrier_hz, _relative_power, _power in _detect_accumulated_carriers(frames, config):
-        track = registry.track_for(carrier_hz)
-        decoded, _active_count, _first_seen_s, _last_seen_s = _decode_carrier_from_frames(frames, track.carrier_hz, config)
-        if not decoded.text:
+        track = registry.track_for(carrier_hz, time_s)
+        sessions = _decode_carrier_sessions_from_frames(frames, track.carrier_hz, config, time_s)
+        active_session = registry.sync_sessions(track, sessions)
+        if active_session is None or not active_session.decoded.text:
             continue
-        quality = score_decode_result(decoded)
-        text_to_emit = _text_to_emit(track, decoded.text, quality.score, config)
+        quality = active_session.quality
+        text_to_emit = _text_to_emit(track, active_session.decoded.text, quality.score, config)
         if not text_to_emit:
             continue
         updates.append(
             StreamUpdate(
                 time_s=round(time_s, 3),
                 track_id=track.track_id,
+                session_id=track.session_id,
                 carrier_hz=round(track.carrier_hz, 3),
                 score=quality.score,
                 text=text_to_emit,
@@ -328,6 +539,21 @@ def _updates_from_frames(
         )
     return updates
 
+
+
+def _events_from_updates(updates: list[StreamUpdate]) -> list[StreamEvent]:
+    return [
+        StreamEvent(
+            time_s=update.time_s,
+            kind="TEXT_COMMITTED",
+            channel_id=update.track_id,
+            session_id=update.session_id,
+            carrier_hz=update.carrier_hz,
+            text=update.text,
+            score=update.score,
+        )
+        for update in updates
+    ]
 
 
 def _text_to_emit(
@@ -371,31 +597,133 @@ def _common_text_prefix(left: str, right: str) -> str:
         index += 1
     return left[:index]
 
+
 def _final_tracks_from_frames(
     frames: list[SpectrumFrame],
     registry: _TrackRegistry,
     config: StreamingConfig,
+    final_time_s: float,
 ) -> list[StreamTrackResult]:
-    results: list[StreamTrackResult] = []
+    active_sessions_by_track_id: dict[int, StreamSessionResult] = {}
+
     for carrier_hz, _relative_power, _power in _detect_accumulated_carriers(frames, config):
-        track = registry.track_for(carrier_hz)
-        decoded, active_count, first_seen_s, last_seen_s = _decode_carrier_from_frames(frames, track.carrier_hz, config)
-        if active_count < config.min_track_hits or not decoded.text:
+        track = registry.track_for(carrier_hz, final_time_s)
+        sessions = _decode_carrier_sessions_from_frames(
+            frames,
+            track.carrier_hz,
+            config,
+            final_time_s,
+        )
+        active_session = registry.sync_sessions(track, sessions)
+        if active_session is not None and active_session.decoded.text:
+            active_sessions_by_track_id[track.track_id] = active_session
+
+    results: list[StreamTrackResult] = []
+    for track in registry.tracks:
+        sessions = list(track.finalized_sessions)
+        active_session = active_sessions_by_track_id.get(track.track_id)
+        if active_session is not None and active_session.session_id not in {session.session_id for session in sessions}:
+            sessions.append(active_session)
+        sessions.sort(key=lambda session: session.session_id)
+        if not sessions:
             continue
-        quality = score_decode_result(decoded)
+
+        decoded = _combined_decode_from_sessions(sessions, track.carrier_hz)
+        representative = sessions[-1]
+        first_seen_s = min(session.first_seen_s for session in sessions)
+        last_seen_s = max(session.last_seen_s for session in sessions)
+        hits = sum(session.hits for session in sessions)
         results.append(
             StreamTrackResult(
                 track_id=track.track_id,
                 carrier_hz=round(track.carrier_hz, 3),
                 first_seen_s=round(first_seen_s, 3),
                 last_seen_s=round(last_seen_s, 3),
-                hits=active_count,
-                quality=quality,
+                hits=hits,
+                quality=representative.quality,
                 decoded=decoded,
+                sessions=sessions,
             )
         )
     results.sort(key=lambda result: (result.track_id, result.quality.score))
     return results
+
+
+def _combined_decode_from_sessions(sessions: list[StreamSessionResult], carrier_hz: float) -> DecodeResult:
+    text = " ".join(session.decoded.text for session in sessions if session.decoded.text).strip()
+    tokens: list[str] = []
+    runs: list[DetectedRun] = []
+    classified_runs: list[ClassifiedRun] = []
+    unit_values = [session.decoded.unit_s for session in sessions if session.decoded.unit_s > 0]
+    threshold_values = [session.decoded.threshold for session in sessions]
+    for index, session in enumerate(sessions):
+        if index > 0 and tokens and tokens[-1] != "/":
+            tokens.append("/")
+        tokens.extend(session.decoded.tokens)
+        runs.extend(session.decoded.runs)
+        classified_runs.extend(session.decoded.classified_runs)
+    return DecodeResult(
+        text=text,
+        tokens=tokens,
+        runs=runs,
+        classified_runs=classified_runs,
+        carrier_hz=carrier_hz,
+        unit_s=unit_values[-1] if unit_values else 0.0,
+        threshold=threshold_values[-1] if threshold_values else 0.0,
+    )
+
+
+def _final_events_from_tracks(
+    tracks: list[StreamTrackResult],
+    registry: _TrackRegistry,
+    final_time_s: float,
+    config: StreamingConfig,
+) -> list[StreamEvent]:
+    events: list[StreamEvent] = []
+    for result in tracks:
+        track = registry.track_by_id(result.track_id)
+        sessions = result.sessions or [
+            StreamSessionResult(
+                session_id=1,
+                first_seen_s=result.first_seen_s,
+                last_seen_s=result.last_seen_s,
+                hits=result.hits,
+                final_time_s=final_time_s,
+                final_reason=config.final_event_reason,
+                quality=result.quality,
+                decoded=result.decoded,
+            )
+        ]
+        for session in sessions:
+            if track is not None and session.session_id in track.finalized_session_ids:
+                continue
+            events.append(
+                StreamEvent(
+                    time_s=round(session.final_time_s, 3),
+                    kind="SESSION_FINAL",
+                    channel_id=result.track_id,
+                    session_id=session.session_id,
+                    carrier_hz=result.carrier_hz,
+                    text=session.decoded.text,
+                    score=session.quality.score,
+                    reason=session.final_reason,
+                )
+            )
+            if track is not None:
+                track.finalized_session_ids.add(session.session_id)
+        events.append(
+            StreamEvent(
+                time_s=round(final_time_s, 3),
+                kind="CHANNEL_DORMANT",
+                channel_id=result.track_id,
+                session_id=None,
+                carrier_hz=result.carrier_hz,
+                text=result.decoded.text,
+                score=result.quality.score,
+                reason=config.final_event_reason,
+            )
+        )
+    return events
 
 
 def _detect_accumulated_carriers(
@@ -464,7 +792,7 @@ def _decode_carrier_from_frames(
     threshold = _energy_threshold(energy, decoder_config)
     active = energy > threshold
     active_count = int(np.sum(active))
-    runs = _runs_from_activity(active, config.hop_ms / 1000)
+    runs = _offset_runs(_runs_from_activity(active, config.hop_ms / 1000), frames[0].start_s)
     try:
         unit_s = _estimate_unit_from_runs(runs)
     except ValueError:
@@ -490,6 +818,131 @@ def _decode_carrier_from_frames(
     )
 
 
+def _decode_carrier_sessions_from_frames(
+    frames: list[SpectrumFrame],
+    carrier_hz: float,
+    config: StreamingConfig,
+    final_time_s: float,
+) -> list[StreamSessionResult]:
+    if not frames:
+        return []
+
+    energy = np.asarray(
+        [_band_energy(frame.spectrum, frame.freqs, carrier_hz, config.bandwidth_hz) for frame in frames],
+        dtype=np.float32,
+    )
+    if len(energy) == 0 or float(np.max(energy)) <= 0:
+        return []
+
+    decoder_config = DecoderConfig(
+        frame_ms=config.frame_ms,
+        hop_ms=config.hop_ms,
+        min_tone_hz=config.min_tone_hz,
+        max_tone_hz=config.max_tone_hz,
+        bandwidth_hz=config.bandwidth_hz,
+        threshold_ratio=config.threshold_ratio,
+        target_tone_hz=carrier_hz,
+    )
+    threshold = _energy_threshold(energy, decoder_config)
+    active = energy > threshold
+    runs = _offset_runs(_runs_from_activity(active, config.hop_ms / 1000), frames[0].start_s)
+    try:
+        unit_s = _estimate_unit_from_runs(runs)
+    except ValueError:
+        return []
+
+    gap_threshold_s = max(config.min_session_gap_s, config.session_gap_units * unit_s)
+    segments = _split_runs_by_session_gap(runs, gap_threshold_s, final_time_s)
+    sessions: list[StreamSessionResult] = []
+    for index, (segment_runs, session_final_time_s, reason) in enumerate(segments, start=1):
+        decoded = _decode_run_segment(segment_runs, carrier_hz, threshold)
+        if not decoded.text:
+            continue
+        quality = score_decode_result(decoded)
+        first_seen_s, last_seen_s = _active_time_bounds(segment_runs)
+        hits = _tone_hit_count(segment_runs, config.hop_ms / 1000)
+        sessions.append(
+            StreamSessionResult(
+                session_id=index,
+                first_seen_s=round(first_seen_s, 3),
+                last_seen_s=round(last_seen_s, 3),
+                hits=hits,
+                final_time_s=round(session_final_time_s, 3),
+                final_reason=reason,
+                quality=quality,
+                decoded=decoded,
+            )
+        )
+    return sessions
+
+
+
+def _offset_runs(runs: list[DetectedRun], offset_s: float) -> list[DetectedRun]:
+    if not runs or abs(offset_s) < 1e-12:
+        return runs
+    return [
+        DetectedRun(
+            kind=run.kind,
+            start_s=run.start_s + offset_s,
+            duration_s=run.duration_s,
+        )
+        for run in runs
+    ]
+
+def _split_runs_by_session_gap(
+    runs: list[DetectedRun],
+    gap_threshold_s: float,
+    final_time_s: float,
+) -> list[tuple[list[DetectedRun], float, str]]:
+    segments: list[tuple[list[DetectedRun], float, str]] = []
+    current: list[DetectedRun] = []
+
+    for run in runs:
+        if run.kind == "gap" and run.duration_s >= gap_threshold_s and _has_tone(current):
+            segments.append((current, run.start_s + gap_threshold_s, "silence_gap"))
+            current = []
+            continue
+        if current or run.kind == "tone":
+            current.append(run)
+
+    if _has_tone(current):
+        segments.append((current, final_time_s, "end_of_stream"))
+    return segments
+
+
+def _decode_run_segment(
+    runs: list[DetectedRun],
+    carrier_hz: float,
+    threshold: float,
+) -> DecodeResult:
+    try:
+        unit_s = _estimate_unit_from_runs(runs)
+    except ValueError:
+        return _empty_decode(carrier_hz, threshold=threshold, runs=runs)
+    classified_runs = classify_runs(runs, unit_s)
+    tokens = _classified_runs_to_tokens(classified_runs)
+    text = decode_tokens(tokens)
+    return DecodeResult(
+        text=text,
+        tokens=tokens,
+        runs=runs,
+        classified_runs=classified_runs,
+        carrier_hz=carrier_hz,
+        unit_s=unit_s,
+        threshold=threshold,
+    )
+
+
+def _has_tone(runs: list[DetectedRun]) -> bool:
+    return any(run.kind == "tone" for run in runs)
+
+
+def _tone_hit_count(runs: list[DetectedRun], hop_s: float) -> int:
+    if hop_s <= 0:
+        return sum(1 for run in runs if run.kind == "tone")
+    return sum(max(1, round(run.duration_s / hop_s)) for run in runs if run.kind == "tone")
+
+
 def _active_time_bounds(runs: list[DetectedRun]) -> tuple[float, float]:
     tones = [run for run in runs if run.kind == "tone"]
     if not tones:
@@ -513,6 +966,7 @@ def _maybe_emit_updates(tracks: list[_TrackState], time_s: float, config: Stream
             StreamUpdate(
                 time_s=round(time_s, 3),
                 track_id=track.track_id,
+                session_id=1,
                 carrier_hz=round(track.carrier_hz, 3),
                 score=quality.score,
                 text=decoded.text,
@@ -640,3 +1094,9 @@ def _validate_streaming_config(config: StreamingConfig) -> None:
         raise ValueError("emit_interval_s must be positive")
     if config.min_update_score <= 0:
         raise ValueError("min_update_score must be positive")
+    if config.session_gap_units <= 0:
+        raise ValueError("session_gap_units must be positive")
+    if config.min_session_gap_s <= 0:
+        raise ValueError("min_session_gap_s must be positive")
+    if config.history_margin_s < 0:
+        raise ValueError("history_margin_s must not be negative")
