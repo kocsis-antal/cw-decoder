@@ -153,3 +153,27 @@ A `--source` value is a semicolon-separated list of `key=value` pairs. Required
 keys are `freq` and `text`. Useful optional keys are `id`, `preset`, `start`,
 `amplitude`, `wpm`, `seed`, and the same distortion keys supported by the
 single-source generator, for example `frequency_drift_hz` or `amplitude_fade`.
+
+## Streaming simulation
+
+`stream-sim` does not split the WAV into separate files. It reads the audio as a
+continuous sample stream, feeds it into an internal ring-buffer-like STFT, and
+produces overlapping FFT frames. Carrier detection and decoding are updated from
+the accumulated frame history, which is the first step toward replacing the WAV
+input with a microphone input later.
+
+```bash
+docker compose -f infra/compose.yml run --rm cw python -m cw.cli stream-sim samples/generated/two_sources.wav
+```
+
+The output contains incremental `updates` and a final track table. By default,
+updates are stabilized: a partial text is printed only after it appears as a
+stable prefix in consecutive decoding snapshots and its quality score is below
+`--min-update-score`. This avoids most early half-letter guesses while still
+showing the text grow on the fly.
+
+For debugging the raw, unstable candidates, use:
+
+```bash
+docker compose -f infra/compose.yml run --rm cw python -m cw.cli stream-sim samples/generated/two_sources.wav --raw-updates
+```

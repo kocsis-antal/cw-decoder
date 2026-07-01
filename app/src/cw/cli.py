@@ -121,6 +121,26 @@ def main() -> None:
     contest_live_multi_parser.add_argument("--consensus-top", type=int, default=3)
     _add_carrier_detection_options(contest_live_multi_parser)
 
+    stream_sim_parser = subparsers.add_parser("stream-sim")
+    stream_sim_parser.add_argument("wav_path", type=Path)
+    stream_sim_parser.add_argument("--input-block-ms", type=float, default=10.0)
+    stream_sim_parser.add_argument("--frame-ms", type=float, default=30.0)
+    stream_sim_parser.add_argument("--hop-ms", type=float, default=5.0)
+    stream_sim_parser.add_argument("--min-tone-hz", type=float, default=200.0)
+    stream_sim_parser.add_argument("--max-tone-hz", type=float, default=2000.0)
+    stream_sim_parser.add_argument("--bandwidth-hz", type=float, default=40.0)
+    stream_sim_parser.add_argument("--threshold-ratio", type=float, default=0.35)
+    stream_sim_parser.add_argument("--peak-relative-threshold", type=float, default=0.25)
+    stream_sim_parser.add_argument("--min-separation-hz", type=float, default=80.0)
+    stream_sim_parser.add_argument("--max-tracks", type=int, default=5)
+    stream_sim_parser.add_argument("--max-track-gap-s", type=float, default=2.0)
+    stream_sim_parser.add_argument("--carrier-smoothing", type=float, default=0.20)
+    stream_sim_parser.add_argument("--min-track-hits", type=int, default=2)
+    stream_sim_parser.add_argument("--emit-interval-s", type=float, default=0.50)
+    stream_sim_parser.add_argument("--min-update-score", type=float, default=25.0)
+    stream_sim_parser.add_argument("--raw-updates", action="store_true")
+    stream_sim_parser.add_argument("--updates", type=int, default=20)
+
     args = parser.parse_args()
 
     if args.command == "encode":
@@ -405,26 +425,28 @@ def main() -> None:
         )
         results = run_multi_live_contest(args.wav_path, grid, _carrier_detection_config(args))
         print(f"carriers={len(results)}")
-        print("source carrier_hz rel_power best_score consensus_share frame hop bandwidth threshold unit text")
         for result in results:
             best_consensus = result.best_consensus
             config = best_consensus.best_config
             decoded = best_consensus.best_decoded
+            print()
             print(
-                f"{result.rank:>6} "
-                f"{result.carrier.frequency_hz:>10.1f} "
-                f"{result.carrier.relative_power:>9.3f} "
-                f"{best_consensus.best_score:>10.1f} "
-                f"{best_consensus.share:>15.1%} "
-                f"{config.frame_ms:>5.1f} "
-                f"{config.hop_ms:>3.1f} "
-                f"{config.bandwidth_hz:>9.1f} "
-                f"{config.threshold_ratio:>9.2f} "
-                f"{decoded.unit_s:>4.3f} "
-                f"{_display_text(best_consensus.text)}"
+                f"source={result.rank} "
+                f"carrier_hz={result.carrier.frequency_hz:.1f} "
+                f"rel_power={result.carrier.relative_power:.3f} "
+                f"best_score={best_consensus.best_score:.1f} "
+                f"consensus_share={best_consensus.share:.1%}"
             )
+            print(
+                f"best_config=frame:{config.frame_ms:g}ms "
+                f"hop:{config.hop_ms:g}ms "
+                f"bandwidth:{config.bandwidth_hz:g}Hz "
+                f"threshold:{config.threshold_ratio:g} "
+                f"unit:{decoded.unit_s:.3f}s"
+            )
+            print(f"text={_display_text(best_consensus.text)}")
             if args.top > 0:
-                print("  top:")
+                print("top:")
                 for live_result in result.live_results[: args.top]:
                     quality = live_result.quality
                     cfg = live_result.config
@@ -436,7 +458,7 @@ def main() -> None:
                         f"unit={dec.unit_s:.3f} text={_display_text(dec.text)}"
                     )
             if args.consensus_top > 0:
-                print("  consensus:")
+                print("consensus:")
                 for consensus in result.consensus[: args.consensus_top]:
                     print(
                         f"  {consensus.rank:>4} "
@@ -445,6 +467,35 @@ def main() -> None:
                         f"score={consensus.best_score:>6.1f} "
                         f"text={_display_text(consensus.text)}"
                     )
+    elif args.command == "stream-sim":
+        from cw.streaming import simulate_stream_from_wav
+
+        result = simulate_stream_from_wav(args.wav_path, _streaming_config(args))
+        print(f"duration_s={result.duration_s:.3f}")
+        print(f"updates={len(result.updates)}")
+        for update in result.updates[: args.updates]:
+            print(
+                f"t={update.time_s:>7.3f}s "
+                f"track={update.track_id:<2} "
+                f"carrier={update.carrier_hz:>7.1f}Hz "
+                f"score={update.score:>6.1f} "
+                f"text={_display_text(update.text)}"
+            )
+        if len(result.updates) > args.updates:
+            print(f"... {len(result.updates) - args.updates} more updates")
+        print("final:")
+        print("track carrier_hz first_seen last_seen hits score unit text")
+        for track in result.tracks:
+            print(
+                f"{track.track_id:>5} "
+                f"{track.carrier_hz:>10.1f} "
+                f"{track.first_seen_s:>10.3f} "
+                f"{track.last_seen_s:>9.3f} "
+                f"{track.hits:>4} "
+                f"{track.quality.score:>5.1f} "
+                f"{track.decoded.unit_s:>4.3f} "
+                f"{_display_text(track.decoded.text)}"
+            )
 
 
 def _add_carrier_detection_options(parser: argparse.ArgumentParser) -> None:
@@ -490,6 +541,29 @@ def _decoder_config(args: argparse.Namespace):
         max_tone_hz=args.max_tone_hz,
         bandwidth_hz=args.bandwidth_hz,
         threshold_ratio=args.threshold_ratio,
+    )
+
+
+def _streaming_config(args: argparse.Namespace):
+    from cw.streaming import StreamingConfig
+
+    return StreamingConfig(
+        input_block_ms=args.input_block_ms,
+        frame_ms=args.frame_ms,
+        hop_ms=args.hop_ms,
+        min_tone_hz=args.min_tone_hz,
+        max_tone_hz=args.max_tone_hz,
+        bandwidth_hz=args.bandwidth_hz,
+        threshold_ratio=args.threshold_ratio,
+        peak_relative_threshold=args.peak_relative_threshold,
+        min_separation_hz=args.min_separation_hz,
+        max_tracks=args.max_tracks,
+        max_track_gap_s=args.max_track_gap_s,
+        carrier_smoothing=args.carrier_smoothing,
+        min_track_hits=args.min_track_hits,
+        emit_interval_s=args.emit_interval_s,
+        stable_updates=not args.raw_updates,
+        min_update_score=args.min_update_score,
     )
 
 
