@@ -218,11 +218,23 @@ For debugging the raw, unstable candidates, use:
 docker compose -f infra/compose.yml run --rm cw python -m cw.cli stream-sim samples/generated/two_sources.wav --raw-updates
 ```
 
-Print channel/session lifecycle events:
+Print channel/session lifecycle events for humans:
 
 ```bash
 docker compose -f infra/compose.yml run --rm cw python -m cw.cli stream-sim samples/generated/two_sources.wav --events
 ```
+
+Print the same lifecycle events as JSON Lines for tools, GUI prototypes, or
+future websocket adapters:
+
+```bash
+docker compose -f infra/compose.yml run --rm cw python -m cw.cli stream-sim samples/generated/two_sources.wav --json-events
+```
+
+Each JSON line uses the stable schema `cw.stream.event.v1` and contains fields
+such as `type`, `time_s`, `channel_id`, `session_id`, `carrier_hz`, `text`,
+`score`, and `reason`. The external JSON field is named `type`; the internal
+Python dataclass still uses `kind`.
 
 The event stream separates a durable carrier channel from a concrete transmission
 session. A channel can become dormant and still remain useful for a GUI card,
@@ -236,10 +248,43 @@ overs do not collapse into one unreadable line.
 By default, finalized session frame history is pruned from the rolling stream
 state. The channel keeps the finalized session text and metadata, but the old
 FFT frames no longer have to be decoded again on every update. The `stream-sim`
-header prints `frames_processed`, `retained_frames`, and `pruned_frames` so this
-can be checked during experiments. Use `--no-prune-finalized-sessions` when you
-want full-history debug behaviour. `--history-margin-s` controls the small
-safety overlap kept before the active session.
+header prints `frames_processed`, `retained_frames`, `pruned_frames`,
+`active_pruned_frames`, and `finalized_pruned_frames` so this can be checked
+during experiments. Use `--no-prune-finalized-sessions` when you want
+full-history debug behaviour for completed sessions. `--history-margin-s`
+controls the small safety overlap kept before the active session.
+
+There is also an opt-in active-session pruning mode:
+
+```bash
+docker compose -f infra/compose.yml run --rm cw python -m cw.cli stream-sim samples/generated/qso.wav \
+  --prune-committed-active-sessions
+```
+
+This keeps committed text in `SessionState`, trims the decode tail after the
+last safely committed word, and can discard older frames even while the current
+transmission is still active. It is intentionally not the default yet: WAV replay
+regressions stay conservative, while long-running experiments can turn it on and
+watch `active_pruned_frames`. `--active-history-margin-s` can override the
+safety margin used for this active pruning path.
+
+For code that wants to feed audio progressively, use `StreamProcessor` directly:
+
+```python
+from cw.streaming import StreamProcessor, StreamingConfig
+
+processor = StreamProcessor(sample_rate=8000, config=StreamingConfig())
+for block in audio_blocks:
+    chunk = processor.push(block)
+    for event in chunk.events:
+        print(event.kind, event.text)
+
+result = processor.finish()
+```
+
+`stream-sim` still uses the same processor under the hood, but this push/finish
+API is the shape that a future microphone, SDR, websocket, or GUI runner can use
+without reworking the decoder core.
 
 
 ### Streaming core layout
@@ -251,12 +296,14 @@ stream_models.py  public stream dataclasses and configuration validation
 stream_stft.py    incremental overlapping STFT over a continuous sample stream
 stream_decode.py  carrier/session decoding helpers from retained FFT frames
 stream_tracker.py frame-by-frame spectral peak tracking into carrier tracks
-stream_state.py   mutable ChannelState/SessionState lifecycle and commit bookkeeping
-streaming.py      stream orchestration and pruning
+stream_state.py   mutable ChannelState/SessionState lifecycle, commit bookkeeping, active prune anchors
+stream_events.py  stable JSON/JSONL serialization for stream events
+stream_processor.py stateful push/finish live processor and pruning orchestration
+streaming.py      compatibility/public API re-exports
 ```
 
 
-The tracker keeps smoothed carrier estimates, marks tracks dormant after `--max-track-gap-s`, and filters long-term weak sidebands/noise through `--track-relative-threshold`. Peak separation, frame-to-frame track matching, and channel-level merging are separate configuration knobs, so experiments can distinguish "two spectral peaks", "same drifting carrier track", and "same GUI/logical channel". The mutable live state is explicit: `ChannelState` is the long-lived carrier/GUI anchor, while `SessionState` owns the current transmission's committed prefix and start/final bookkeeping. Decoded tempo/unit values still come from each `StreamSessionResult`, so a later reply on the same channel starts with a clean session-level timing estimate instead of inheriting the previous operator's tempo.
+The tracker keeps smoothed carrier estimates, marks tracks dormant after `--max-track-gap-s`, and filters long-term weak sidebands/noise through `--track-relative-threshold`. Peak separation, frame-to-frame track matching, and channel-level merging are separate configuration knobs, so experiments can distinguish "two spectral peaks", "same drifting carrier track", and "same GUI/logical channel". The mutable live state is explicit: `ChannelState` is the long-lived carrier/GUI anchor, while `SessionState` owns the current transmission's committed prefix, active prune boundary, and start/final bookkeeping. Decoded tempo/unit values still come from each `StreamSessionResult`, so a later reply on the same channel starts with a clean session-level timing estimate instead of inheriting the previous operator's tempo.
 
 `cw.streaming` still re-exports the public stream API, so existing imports such
 as `from cw.streaming import StreamingConfig, StreamingSTFT` continue to work.

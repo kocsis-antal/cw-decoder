@@ -39,7 +39,9 @@ class StreamingConfig:
     min_session_gap_s: float = 1.20
     final_event_reason: str = "end_of_stream"
     prune_finalized_sessions: bool = True
+    prune_committed_active_sessions: bool = False
     history_margin_s: float = 0.25
+    active_history_margin_s: float | None = None
 
 
 @dataclass(frozen=True)
@@ -89,6 +91,19 @@ class StreamTrackResult:
 
 
 @dataclass(frozen=True)
+class StreamChunkResult:
+    time_s: float
+    updates: list[StreamUpdate] = field(default_factory=list)
+    events: list[StreamEvent] = field(default_factory=list)
+    frames_processed: int = 0
+    tracker_frames_processed: int = 0
+    retained_frames: int = 0
+    pruned_frames: int = 0
+    active_pruned_frames: int = 0
+    finalized_pruned_frames: int = 0
+
+
+@dataclass(frozen=True)
 class StreamSimulationResult:
     duration_s: float
     updates: list[StreamUpdate]
@@ -98,6 +113,8 @@ class StreamSimulationResult:
     tracker_frames_processed: int = 0
     retained_frames: int = 0
     pruned_frames: int = 0
+    active_pruned_frames: int = 0
+    finalized_pruned_frames: int = 0
 
 
 @dataclass(frozen=True)
@@ -182,3 +199,5 @@ def validate_streaming_config(config: StreamingConfig) -> None:
         raise ValueError("min_session_gap_s must be positive")
     if config.history_margin_s < 0:
         raise ValueError("history_margin_s must not be negative")
+    if config.active_history_margin_s is not None and config.active_history_margin_s < 0:
+        raise ValueError("active_history_margin_s must not be negative when set")

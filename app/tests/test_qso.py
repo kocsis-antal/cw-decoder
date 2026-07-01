@@ -143,6 +143,38 @@ def test_stream_sim_discards_finalized_session_frame_history(tmp_path: Path) -> 
     ]
 
 
+def test_stream_sim_can_prune_committed_active_session_history(tmp_path: Path) -> None:
+    wav_path = tmp_path / "contest_qso.wav"
+    write_contest_qso_sample(
+        wav_path,
+        ContestQsoConfig(caller_call="YU7NKA", responder_call="YT7MK", turn_gap_s=1.6, seed=123),
+    )
+
+    result = simulate_stream_from_wav(
+        wav_path,
+        StreamingConfig(
+            max_tracks=2,
+            min_separation_hz=80,
+            emit_interval_s=0.5,
+            min_session_gap_s=1.0,
+            session_gap_units=12,
+            prune_finalized_sessions=True,
+            prune_committed_active_sessions=True,
+        ),
+    )
+
+    assert result.active_pruned_frames > 0
+    assert result.finalized_pruned_frames > 0
+    assert result.pruned_frames == result.active_pruned_frames + result.finalized_pruned_frames
+    assert [session.decoded.text for session in result.tracks[0].sessions] == [
+        "CQ TEST YU7NKA",
+        "YU7NKA YT7MK",
+        "YT7MK 599 001",
+        "TU 599 002",
+        "TU",
+    ]
+
+
 def test_stream_sim_can_keep_full_frame_history_for_debugging(tmp_path: Path) -> None:
     wav_path = tmp_path / "contest_qso.wav"
     write_contest_qso_sample(

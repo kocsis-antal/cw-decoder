@@ -170,10 +170,13 @@ def main() -> None:
     stream_sim_parser.add_argument("--session-gap-units", type=float, default=20.0)
     stream_sim_parser.add_argument("--min-session-gap-s", type=float, default=1.20)
     stream_sim_parser.add_argument("--history-margin-s", type=float, default=0.25)
+    stream_sim_parser.add_argument("--active-history-margin-s", type=float, default=None)
     stream_sim_parser.add_argument("--no-prune-finalized-sessions", action="store_true")
+    stream_sim_parser.add_argument("--prune-committed-active-sessions", action="store_true")
     stream_sim_parser.add_argument("--raw-updates", action="store_true")
     stream_sim_parser.add_argument("--updates", type=int, default=20)
     stream_sim_parser.add_argument("--events", action="store_true", help="Print channel/session lifecycle events")
+    stream_sim_parser.add_argument("--json-events", action="store_true", help="Print channel/session lifecycle events as JSON Lines and suppress human tables")
 
     spacing_parser = subparsers.add_parser("spacing-benchmark")
     spacing_parser.add_argument("--text-a", default="CQ CQ DE YU7NKA")
@@ -639,12 +642,22 @@ def main() -> None:
         from cw.streaming import simulate_stream_from_wav
 
         result = simulate_stream_from_wav(args.wav_path, _streaming_config(args))
+        if args.json_events:
+            from cw.stream_events import stream_result_events_to_jsonl
+
+            jsonl = stream_result_events_to_jsonl(result)
+            if jsonl:
+                print(jsonl)
+            return
+
         print(f"duration_s={result.duration_s:.3f}")
         print(
             f"frames_processed={result.frames_processed} "
             f"tracker_frames_processed={result.tracker_frames_processed} "
             f"retained_frames={result.retained_frames} "
-            f"pruned_frames={result.pruned_frames}"
+            f"pruned_frames={result.pruned_frames} "
+            f"active_pruned_frames={result.active_pruned_frames} "
+            f"finalized_pruned_frames={result.finalized_pruned_frames}"
         )
         print(f"updates={len(result.updates)}")
         for update in result.updates[: args.updates]:
@@ -782,7 +795,9 @@ def _streaming_config(args: argparse.Namespace):
         session_gap_units=args.session_gap_units,
         min_session_gap_s=args.min_session_gap_s,
         prune_finalized_sessions=not args.no_prune_finalized_sessions,
+        prune_committed_active_sessions=args.prune_committed_active_sessions,
         history_margin_s=args.history_margin_s,
+        active_history_margin_s=args.active_history_margin_s,
     )
 
 

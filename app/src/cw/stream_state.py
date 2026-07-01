@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 
+from cw.decoder import DecodeResult
+from cw.morse_table import decode_tokens
 from cw.stream_models import StreamEvent, StreamingConfig, StreamSessionResult, channel_match_hz
 
 
@@ -10,24 +12,86 @@ class SessionState:
     """Mutable live state for one transmission within a carrier channel.
 
     The decoded timing/tempo belongs to the StreamSessionResult produced by the
-    decoder. This state only keeps live bookkeeping: whether the session-start
-    event has already been emitted, which prefix was stable enough to commit,
-    and whether the session has already been finalized.
+    decoder.  This state keeps live bookkeeping: session start/final events,
+    stable committed text, and the safe time up to which already committed audio
+    may be pruned from the rolling frame history.
     """
 
     session_id: int
     first_seen_s: float | None = None
+    required_frame_start_s: float | None = None
     start_event_emitted: bool = False
     last_candidate_text: str = ""
     committed_text: str = ""
+    committed_until_s: float | None = None
+    pruned_text: str = ""
+    last_tail_text: str = ""
+    last_tail_overlap_chars: int = 0
+    last_tail_cutoff_s: float | None = None
 
-    def mark_observed(self, session: StreamSessionResult) -> None:
+    def mark_observed(self, session: StreamSessionResult, config: StreamingConfig) -> None:
         if self.first_seen_s is None:
             self.first_seen_s = session.first_seen_s
+        if config.prune_committed_active_sessions and self.committed_until_s is not None:
+            self.required_frame_start_s = self.committed_until_s
+        else:
+            self.required_frame_start_s = session.first_seen_s
 
     def reset_live_text(self) -> None:
         self.last_candidate_text = ""
         self.committed_text = ""
+        self.committed_until_s = None
+        self.pruned_text = ""
+        self.last_tail_text = ""
+        self.last_tail_overlap_chars = 0
+        self.last_tail_cutoff_s = None
+
+    def with_committed_prefix(self, session: StreamSessionResult) -> StreamSessionResult:
+        tail_cutoff_s = self.committed_until_s
+        tail_text = _decoded_text_after_s(session.decoded, tail_cutoff_s) if tail_cutoff_s is not None else session.decoded.text
+        if tail_cutoff_s is None:
+            merged_text = session.decoded.text
+            overlap_chars = 0
+        else:
+            merged_text, overlap_chars = _merge_committed_prefix_and_tail(self.committed_text, tail_text)
+        self.last_tail_text = tail_text
+        self.last_tail_overlap_chars = overlap_chars
+        self.last_tail_cutoff_s = tail_cutoff_s
+        first_seen_s = self.first_seen_s if self.first_seen_s is not None else session.first_seen_s
+        if merged_text == session.decoded.text and first_seen_s == session.first_seen_s:
+            return session
+        return replace(
+            session,
+            first_seen_s=round(first_seen_s, 3),
+            decoded=replace(session.decoded, text=merged_text),
+        )
+
+    def commit_from_session(self, session: StreamSessionResult, config: StreamingConfig) -> str | None:
+        previous_committed = self.committed_text
+        text_to_emit = self.text_to_commit(session.decoded.text, session.quality.score, config)
+        if text_to_emit is None:
+            return None
+
+        safe_prune_text = _safe_active_prune_prefix(self.committed_text)
+        if safe_prune_text.startswith(self.pruned_text) and len(safe_prune_text) > len(self.pruned_text):
+            tail_prefix_chars = _tail_prefix_chars_for_merged_prefix(
+                prefix_len=len(safe_prune_text),
+                base_len=len(previous_committed),
+                overlap_len=self.last_tail_overlap_chars,
+            )
+            if tail_prefix_chars is not None:
+                committed_until_s = _decoded_tail_prefix_end_s(
+                    session.decoded,
+                    tail_prefix_chars,
+                    after_s=self.last_tail_cutoff_s,
+                )
+                if committed_until_s is not None:
+                    self.pruned_text = safe_prune_text
+                    self.committed_until_s = max(self.committed_until_s or 0.0, committed_until_s)
+                    if config.prune_committed_active_sessions:
+                        self.required_frame_start_s = self.committed_until_s
+
+        return text_to_emit
 
     def text_to_commit(self, current_text: str, score: float, config: StreamingConfig) -> str | None:
         if not config.stable_updates:
@@ -79,13 +143,19 @@ class ChannelState:
 
     @property
     def active_session_first_seen_s(self) -> float | None:
-        return self.current_session.first_seen_s
+        # Backwards-compatible name used by the pruning code.  It now means the
+        # earliest frame that the active session still needs, not necessarily the
+        # original first tone of the session.
+        return self.current_session.required_frame_start_s
 
     def start_next_session(self) -> None:
         self.current_session = SessionState(self.current_session.session_id + 1)
 
     def commit_text_candidate(self, current_text: str, score: float, config: StreamingConfig) -> str | None:
         return self.current_session.text_to_commit(current_text, score, config)
+
+    def commit_session_candidate(self, session: StreamSessionResult, config: StreamingConfig) -> str | None:
+        return self.current_session.commit_from_session(session, config)
 
 
 class ChannelRegistry:
@@ -139,7 +209,7 @@ class ChannelRegistry:
 
     def sync_sessions(self, channel: ChannelState, sessions: list[StreamSessionResult]) -> StreamSessionResult | None:
         active_session: StreamSessionResult | None = None
-        channel.current_session.first_seen_s = None
+        channel.current_session.required_frame_start_s = None
 
         for decoded_session in sessions:
             existing = self._matching_finalized_session(channel, decoded_session)
@@ -150,7 +220,8 @@ class ChannelRegistry:
 
             session = self._with_current_session_id(channel, decoded_session)
             self._ensure_session_started(channel, session)
-            channel.current_session.mark_observed(session)
+            channel.current_session.mark_observed(session, self.config)
+            session = channel.current_session.with_committed_prefix(session)
 
             if session.final_reason == "silence_gap":
                 self._finalize_session(channel, session)
@@ -159,14 +230,14 @@ class ChannelRegistry:
 
         return active_session
 
-    def prune_before_s(self) -> float | None:
+    def prune_cutoff_s(self) -> tuple[float, str] | None:
         active_starts = [
             channel.active_session_first_seen_s
             for channel in self._channels
             if channel.active_session_first_seen_s is not None
         ]
         if active_starts:
-            return min(active_starts)
+            return min(active_starts), "active"
 
         finalized_times = [
             session.final_time_s
@@ -174,8 +245,12 @@ class ChannelRegistry:
             for session in channel.finalized_sessions
         ]
         if finalized_times:
-            return max(finalized_times)
+            return max(finalized_times), "finalized"
         return None
+
+    def prune_before_s(self) -> float | None:
+        cutoff = self.prune_cutoff_s()
+        return None if cutoff is None else cutoff[0]
 
     def channel_by_id(self, track_id: int) -> ChannelState | None:
         for channel in self._channels:
@@ -250,3 +325,82 @@ def _common_text_prefix(left: str, right: str) -> str:
     while index < limit and left[index] == right[index]:
         index += 1
     return left[:index]
+
+
+def _merge_committed_prefix_and_tail(prefix: str, tail: str) -> tuple[str, int]:
+    if not prefix:
+        return tail, 0
+    if not tail:
+        return prefix, 0
+
+    max_overlap = min(len(prefix), len(tail))
+    for overlap in range(max_overlap, 0, -1):
+        if prefix.endswith(tail[:overlap]):
+            return prefix + tail[overlap:], overlap
+    return f"{prefix} {tail}".strip(), 0
+
+
+def _safe_active_prune_prefix(text: str) -> str:
+    last_space = text.rstrip().rfind(" ")
+    if last_space <= 0:
+        return ""
+    return text[:last_space].rstrip()
+
+
+def _tail_prefix_chars_for_merged_prefix(prefix_len: int, base_len: int, overlap_len: int) -> int | None:
+    if prefix_len <= 0:
+        return None
+    if prefix_len <= base_len:
+        if overlap_len < prefix_len:
+            return None
+        return prefix_len
+    return overlap_len + prefix_len - base_len
+
+
+def _decoded_text_after_s(decoded: DecodeResult, after_s: float | None) -> str:
+    tokens = [token for token, end_s in _decoded_tokens_with_end_times(decoded) if after_s is None or end_s > after_s]
+    return decode_tokens(tokens)
+
+
+def _decoded_tail_prefix_end_s(decoded: DecodeResult, char_count: int, after_s: float | None = None) -> float | None:
+    if char_count <= 0:
+        return None
+
+    tokens: list[str] = []
+    for token, end_s in _decoded_tokens_with_end_times(decoded):
+        if after_s is not None and end_s <= after_s:
+            continue
+        tokens.append(token)
+        if len(decode_tokens(tokens)) >= char_count:
+            return end_s
+    return None
+
+
+def _decoded_tokens_with_end_times(decoded: DecodeResult) -> list[tuple[str, float]]:
+    tokens: list[tuple[str, float]] = []
+    current = ""
+    current_end_s: float | None = None
+
+    def append_current() -> None:
+        nonlocal current, current_end_s
+        if not current:
+            return
+        tokens.append((current, current_end_s or 0.0))
+        current = ""
+        current_end_s = None
+
+    for run in decoded.classified_runs:
+        if run.kind == "tone":
+            current += run.symbol
+            current_end_s = run.start_s + run.duration_s
+            continue
+
+        if run.symbol not in {"letter_gap", "word_gap"}:
+            continue
+
+        append_current()
+        if run.symbol == "word_gap":
+            tokens.append(("/", run.start_s + run.duration_s))
+
+    append_current()
+    return tokens
