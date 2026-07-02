@@ -35,6 +35,7 @@ class SpacingBenchmarkConfig:
     stream_threshold_ratio: float = 0.35
     peak_relative_threshold: float = 0.25
     track_relative_threshold: float = 0.10
+    min_peak_snr_db: float = 0.0
     max_final_score: float | None = 30.0
     shadow_suppression_hz: float | None = None
     shadow_score_margin: float = 15.0
@@ -197,6 +198,7 @@ def _streaming_config(config: SpacingBenchmarkConfig) -> StreamingConfig:
         threshold_ratio=config.stream_threshold_ratio,
         peak_relative_threshold=config.peak_relative_threshold,
         track_relative_threshold=config.track_relative_threshold,
+        min_peak_snr_db=config.min_peak_snr_db,
         max_final_score=config.max_final_score,
         shadow_suppression_hz=config.shadow_suppression_hz,
         shadow_score_margin=config.shadow_score_margin,
@@ -234,6 +236,8 @@ def _validate_spacing_config(config: SpacingBenchmarkConfig) -> None:
         raise ValueError("merge_below_hz and split_from_hz must be positive")
     if config.merge_below_hz > config.split_from_hz:
         raise ValueError("merge_below_hz must not be higher than split_from_hz")
+    if config.min_peak_snr_db < 0:
+        raise ValueError("min_peak_snr_db must not be negative")
     if config.max_final_score is not None and config.max_final_score <= 0:
         raise ValueError("max_final_score must be positive when set")
     if config.shadow_suppression_hz is not None and config.shadow_suppression_hz < 0:

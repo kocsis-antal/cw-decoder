@@ -282,9 +282,109 @@ for block in audio_blocks:
 result = processor.finish()
 ```
 
-`stream-sim` still uses the same processor under the hood, but this push/finish
-API is the shape that a future microphone, SDR, websocket, or GUI runner can use
-without reworking the decoder core.
+There is also a block-source layer for replaying audio through the same shape a
+future microphone or SDR adapter will use:
+
+```python
+from cw.streaming import StreamingConfig, WavFileSource, process_audio_source
+
+config = StreamingConfig()
+source = WavFileSource("samples/generated/two_sources.wav", config.input_block_ms)
+result = process_audio_source(
+    source,
+    config,
+    on_chunk=lambda chunk: [print(event.kind, event.text) for event in chunk.events],
+)
+```
+
+`stream-sim` now reads WAV input through `WavFileSource` instead of loading the
+whole signal before processing. With `--json-events`, events are printed as
+chunks are processed, and only final end-of-stream events are flushed at EOF.
+The same `AudioSource` interface is intended for later microphone, SDR, or
+network audio adapters.
+
+### Raw PCM stdin / virtual microphone input
+
+`stream-stdin` reads raw mono or interleaved PCM from standard input and feeds it
+into the same `StreamProcessor`. This is the first live-input path: the decoder
+does not care whether the bytes come from a real microphone, a virtual audio
+cable, a browser WebSDR monitor, or `ffmpeg`.
+
+A deterministic replay smoke test can be made from any WAV with `ffmpeg`:
+
+```bash
+ffmpeg -hide_banner -loglevel error -i samples/generated/qso.wav -f s16le -ac 1 -ar 8000 - \
+| docker compose -f infra/compose.yml run --rm -T cw python -m cw.cli stream-stdin \
+    --sample-rate 8000 \
+    --sample-format s16le \
+    --json-events \
+    --prune-committed-active-sessions
+```
+
+On Linux/PulseAudio/PipeWire, a browser SDR can be captured through a virtual
+sink and its monitor source:
+
+```bash
+pactl load-module module-null-sink sink_name=cw_sdr sink_properties=device.description=CW_SDR
+# Route the browser/WebSDR tab to CW_SDR in pavucontrol or the system mixer.
+parec -d cw_sdr.monitor --format=s16le --rate=8000 --channels=1 \
+| docker compose -f infra/compose.yml run --rm -T cw python -m cw.cli stream-stdin \
+    --sample-rate 8000 \
+    --sample-format s16le \
+    --json-events \
+    --prune-committed-active-sessions
+```
+
+Supported raw sample formats are `s16le`, `s16be`, `s32le`, `s32be`, `f32le`,
+`f32be`, and `u8`. Use `--channels 2` for stereo input; the source averages
+channels to mono before decoding. `--duration-s` is useful for bounded live
+experiments or tests; without it, the command runs until stdin reaches EOF or it
+is interrupted.
+
+Live input has two squelch layers by default. First, `stream-stdin` requires
+spectral peaks to stand at least `--min-peak-snr-db 14` dB above the per-frame
+spectral floor before they can become carrier tracks. Second, a CW keying gate
+keeps channels/sessions private until the decoded envelope looks like real keyed
+CW rather than a steady carrier or short `E`/`T` noise. The stdin defaults are:
+
+```text
+--min-keying-tone-runs 3
+--min-keying-chars 2
+--min-keying-known-chars 2
+--min-keying-active-duration-s 0.12
+--min-keying-unit-s 0.03
+--min-keying-duty-cycle 0.03
+--max-keying-duty-cycle 0.92
+--max-keying-score 120
+--reject-et-only-sessions
+--merge-short-gaps-ms 25
+--drop-short-tones-ms 12
+```
+
+The last two options are a live deglitch layer. It repairs short dropouts inside
+a dash before unit estimation and drops tiny tone spikes. This helps cases where
+a clean `CQ` would otherwise become punctuation-like text such as `C=` because a
+dash was briefly split into several dots. Experimental WPM/unit hypothesis
+search is also available through `--unit-candidate-spread`,
+`--unit-candidate-steps`, and `--punctuation-penalty`, but it is not enabled by
+default yet because it still needs more real-signal tuning.
+
+For very weak signals, lower the spectral gate, for example
+`--min-peak-snr-db 10`; for a noisy empty band, raise it, for example
+`--min-peak-snr-db 18`. If the first characters of a real station are being held
+back too long, lower the keying gate, for example `--min-keying-chars 1` or
+`--min-keying-tone-runs 2`. `stream-sim` keeps the older permissive lab defaults
+unless you pass these options explicitly.
+
+On Windows, run raw PCM pipes from `cmd.exe`, not PowerShell. PowerShell can
+corrupt binary stdout/stderr pipelines. When host-side `ffmpeg` reads generated
+project files from the repository root, use the host path under `app`, for
+example `app\samples\generated\qso.wav`; inside the container the same file is
+`/app/samples/generated/qso.wav`. A VB-CABLE/WebSDR command looks like this:
+
+```cmd
+ffmpeg -hide_banner -loglevel error -f dshow -i audio="CABLE Output (VB-Audio Virtual Cable)" -f s16le -ac 1 -ar 8000 - | docker compose -f infra\compose.yml run --rm -T cw python -m cw.cli stream-stdin --sample-rate 8000 --sample-format s16le --json-events --prune-committed-active-sessions
+```
 
 
 ### Streaming core layout
@@ -295,15 +395,17 @@ The streaming code is split into a few focused modules:
 stream_models.py  public stream dataclasses and configuration validation
 stream_stft.py    incremental overlapping STFT over a continuous sample stream
 stream_decode.py  carrier/session decoding helpers from retained FFT frames
-stream_tracker.py frame-by-frame spectral peak tracking into carrier tracks
+stream_tracker.py frame-by-frame spectral peak tracking, SNR squelch, carrier tracks
+stream_keying.py CW-like keying gate before public channel/session events
 stream_state.py   mutable ChannelState/SessionState lifecycle, commit bookkeeping, active prune anchors
 stream_events.py  stable JSON/JSONL serialization for stream events
+stream_sources.py block-based WAV/array/raw-PCM audio sources for replay and live input
 stream_processor.py stateful push/finish live processor and pruning orchestration
 streaming.py      compatibility/public API re-exports
 ```
 
 
-The tracker keeps smoothed carrier estimates, marks tracks dormant after `--max-track-gap-s`, and filters long-term weak sidebands/noise through `--track-relative-threshold`. Peak separation, frame-to-frame track matching, and channel-level merging are separate configuration knobs, so experiments can distinguish "two spectral peaks", "same drifting carrier track", and "same GUI/logical channel". The mutable live state is explicit: `ChannelState` is the long-lived carrier/GUI anchor, while `SessionState` owns the current transmission's committed prefix, active prune boundary, and start/final bookkeeping. Decoded tempo/unit values still come from each `StreamSessionResult`, so a later reply on the same channel starts with a clean session-level timing estimate instead of inheriting the previous operator's tempo.
+The tracker keeps smoothed carrier estimates, marks tracks dormant after `--max-track-gap-s`, rejects per-frame peaks below `--min-peak-snr-db`, and filters long-term weak sidebands/noise through `--track-relative-threshold`. Peak separation, frame-to-frame track matching, and channel-level merging are separate configuration knobs, so experiments can distinguish "two spectral peaks", "same drifting carrier track", and "same GUI/logical channel". The mutable live state is explicit: `ChannelState` is the long-lived carrier/GUI anchor, while `SessionState` owns the current transmission's committed prefix, active prune boundary, and start/final bookkeeping. Decoded tempo/unit values still come from each `StreamSessionResult`, so a later reply on the same channel starts with a clean session-level timing estimate instead of inheriting the previous operator's tempo.
 
 `cw.streaming` still re-exports the public stream API, so existing imports such
 as `from cw.streaming import StreamingConfig, StreamingSTFT` continue to work.

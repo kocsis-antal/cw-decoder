@@ -84,6 +84,11 @@ def decode_carrier_sessions_from_frames(
     threshold = _energy_threshold(energy, decoder_config)
     active = energy > threshold
     runs = _offset_runs(_runs_from_activity(active, config.hop_ms / 1000), frames[0].start_s)
+    runs = smooth_keying_runs(
+        runs,
+        merge_short_gaps_s=config.merge_short_gaps_ms / 1000,
+        drop_short_tones_s=config.drop_short_tones_ms / 1000,
+    )
     try:
         unit_s = _estimate_unit_from_runs(runs)
     except ValueError:
@@ -93,7 +98,7 @@ def decode_carrier_sessions_from_frames(
     segments = _split_runs_by_session_gap(runs, gap_threshold_s, final_time_s)
     sessions: list[StreamSessionResult] = []
     for index, (segment_runs, session_final_time_s, reason) in enumerate(segments, start=1):
-        decoded = _decode_run_segment(segment_runs, carrier_hz, threshold)
+        decoded = _decode_run_segment(segment_runs, carrier_hz, threshold, config)
         if not decoded.text:
             continue
         quality = score_decode_result(decoded)
@@ -113,6 +118,111 @@ def decode_carrier_sessions_from_frames(
         )
     return sessions
 
+
+
+
+def smooth_keying_runs(
+    runs: list[DetectedRun],
+    *,
+    merge_short_gaps_s: float = 0.0,
+    drop_short_tones_s: float = 0.0,
+) -> list[DetectedRun]:
+    """Remove short keying glitches before estimating Morse timing.
+
+    Real received audio is not a clean rectangular keying envelope.  AGC,
+    filters, flutter, WebSDR audio processing, and noise can briefly push a
+    dash below threshold.  Without this small debounce step a single dash can
+    become several dots, producing plausible but wrong punctuation such as
+    ``C=`` instead of ``CQ``.
+    """
+
+    if not runs or (merge_short_gaps_s <= 0 and drop_short_tones_s <= 0):
+        return runs
+
+    cleaned = list(runs)
+    if drop_short_tones_s > 0:
+        cleaned = _drop_short_tone_runs(cleaned, drop_short_tones_s)
+    if merge_short_gaps_s > 0:
+        cleaned = _merge_short_internal_gaps(cleaned, merge_short_gaps_s)
+    return cleaned
+
+
+def _drop_short_tone_runs(runs: list[DetectedRun], min_tone_s: float) -> list[DetectedRun]:
+    converted = [
+        DetectedRun("gap", run.start_s, run.duration_s)
+        if run.kind == "tone" and run.duration_s < min_tone_s
+        else run
+        for run in runs
+    ]
+    return _merge_adjacent_runs(converted)
+
+
+def _merge_short_internal_gaps(runs: list[DetectedRun], max_gap_s: float) -> list[DetectedRun]:
+    merged: list[DetectedRun] = []
+    index = 0
+    while index < len(runs):
+        run = runs[index]
+        if run.kind != "tone":
+            merged.append(run)
+            index += 1
+            continue
+
+        start_s = run.start_s
+        end_s = run.start_s + run.duration_s
+        index += 1
+        while (
+            index + 1 < len(runs)
+            and runs[index].kind == "gap"
+            and runs[index].duration_s <= max_gap_s
+            and runs[index + 1].kind == "tone"
+        ):
+            end_s = runs[index + 1].start_s + runs[index + 1].duration_s
+            index += 2
+        merged.append(DetectedRun("tone", start_s, round(end_s - start_s, 10)))
+    return _merge_adjacent_runs(merged)
+
+
+def _merge_adjacent_runs(runs: list[DetectedRun]) -> list[DetectedRun]:
+    if not runs:
+        return []
+    merged: list[DetectedRun] = []
+    for run in runs:
+        if merged and merged[-1].kind == run.kind:
+            previous = merged[-1]
+            end_s = max(previous.start_s + previous.duration_s, run.start_s + run.duration_s)
+            merged[-1] = DetectedRun(previous.kind, previous.start_s, round(end_s - previous.start_s, 10))
+        else:
+            merged.append(run)
+    return merged
+
+
+def _unit_candidates(unit_s: float, spread: float, steps: int) -> list[float]:
+    if unit_s <= 0:
+        return []
+    if spread <= 0 or steps <= 1:
+        return [unit_s]
+    if steps % 2 == 0:
+        steps += 1
+    lower = max(unit_s * (1.0 - spread), 0.001)
+    upper = unit_s * (1.0 + spread)
+    candidates = [round(float(value), 10) for value in np.linspace(lower, upper, steps)]
+    if unit_s not in candidates:
+        candidates.append(unit_s)
+    return sorted(set(candidates))
+
+
+def _decode_choice_score(result: DecodeResult, punctuation_penalty: float) -> tuple[float, int, int, float]:
+    quality = score_decode_result(result)
+    punctuation_count = _punctuation_count(result.text)
+    score = quality.score + punctuation_count * punctuation_penalty
+    known_chars = len([char for char in result.text.replace(" ", "") if char != "?"])
+    # Prefer lower score, then more known characters, fewer punctuation marks,
+    # and finally the original unit estimate neighbourhood by lower raw score.
+    return (score, -known_chars, punctuation_count, quality.score)
+
+
+def _punctuation_count(text: str) -> int:
+    return sum(1 for char in text if char and not char.isspace() and not char.isalnum() and char != "?")
 
 
 def _offset_runs(runs: list[DetectedRun], offset_s: float) -> list[DetectedRun]:
@@ -152,11 +262,27 @@ def _decode_run_segment(
     runs: list[DetectedRun],
     carrier_hz: float,
     threshold: float,
+    config: StreamingConfig,
 ) -> DecodeResult:
     try:
         unit_s = _estimate_unit_from_runs(runs)
     except ValueError:
         return _empty_decode(carrier_hz, threshold=threshold, runs=runs)
+
+    candidates = _unit_candidates(unit_s, config.unit_candidate_spread, config.unit_candidate_steps)
+    decoded_candidates = [_decode_with_unit(runs, carrier_hz, threshold, candidate) for candidate in candidates]
+    return min(
+        decoded_candidates,
+        key=lambda result: _decode_choice_score(result, config.punctuation_penalty),
+    )
+
+
+def _decode_with_unit(
+    runs: list[DetectedRun],
+    carrier_hz: float,
+    threshold: float,
+    unit_s: float,
+) -> DecodeResult:
     classified_runs = classify_runs(runs, unit_s)
     tokens = _classified_runs_to_tokens(classified_runs)
     text = decode_tokens(tokens)

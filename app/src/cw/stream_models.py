@@ -21,6 +21,23 @@ class StreamingConfig:
     threshold_ratio: float = 0.35
     peak_relative_threshold: float = 0.25
     track_relative_threshold: float = 0.10
+    min_peak_snr_db: float = 0.0
+    min_keying_tone_runs: int = 0
+    min_keying_chars: int = 0
+    min_keying_known_chars: int = 0
+    min_keying_active_duration_s: float = 0.0
+    min_keying_duty_cycle: float | None = None
+    max_keying_duty_cycle: float | None = None
+    min_keying_unit_s: float = 0.0
+    max_keying_unit_s: float | None = None
+    max_keying_score: float | None = None
+    reject_et_only_sessions: bool = False
+    et_only_min_chars: int = 3
+    merge_short_gaps_ms: float = 0.0
+    drop_short_tones_ms: float = 0.0
+    unit_candidate_spread: float = 0.0
+    unit_candidate_steps: int = 1
+    punctuation_penalty: float = 0.0
     min_separation_hz: float = 80.0
     peak_min_separation_hz: float | None = None
     track_match_hz: float | None = None
@@ -169,6 +186,46 @@ def validate_streaming_config(config: StreamingConfig) -> None:
         raise ValueError("peak_relative_threshold must be in the (0, 1] range")
     if not 0 < config.track_relative_threshold <= 1:
         raise ValueError("track_relative_threshold must be in the (0, 1] range")
+    if config.min_peak_snr_db < 0:
+        raise ValueError("min_peak_snr_db must not be negative")
+    if config.min_keying_tone_runs < 0:
+        raise ValueError("min_keying_tone_runs must not be negative")
+    if config.min_keying_chars < 0:
+        raise ValueError("min_keying_chars must not be negative")
+    if config.min_keying_known_chars < 0:
+        raise ValueError("min_keying_known_chars must not be negative")
+    if config.min_keying_active_duration_s < 0:
+        raise ValueError("min_keying_active_duration_s must not be negative")
+    if config.min_keying_duty_cycle is not None and not 0 <= config.min_keying_duty_cycle <= 1:
+        raise ValueError("min_keying_duty_cycle must be in the [0, 1] range when set")
+    if config.max_keying_duty_cycle is not None and not 0 <= config.max_keying_duty_cycle <= 1:
+        raise ValueError("max_keying_duty_cycle must be in the [0, 1] range when set")
+    if (
+        config.min_keying_duty_cycle is not None
+        and config.max_keying_duty_cycle is not None
+        and config.min_keying_duty_cycle > config.max_keying_duty_cycle
+    ):
+        raise ValueError("min_keying_duty_cycle must not be greater than max_keying_duty_cycle")
+    if config.min_keying_unit_s < 0:
+        raise ValueError("min_keying_unit_s must not be negative")
+    if config.max_keying_unit_s is not None and config.max_keying_unit_s <= 0:
+        raise ValueError("max_keying_unit_s must be positive when set")
+    if config.max_keying_unit_s is not None and config.min_keying_unit_s > config.max_keying_unit_s:
+        raise ValueError("min_keying_unit_s must not be greater than max_keying_unit_s")
+    if config.max_keying_score is not None and config.max_keying_score <= 0:
+        raise ValueError("max_keying_score must be positive when set")
+    if config.et_only_min_chars < 1:
+        raise ValueError("et_only_min_chars must be positive")
+    if config.merge_short_gaps_ms < 0:
+        raise ValueError("merge_short_gaps_ms must not be negative")
+    if config.drop_short_tones_ms < 0:
+        raise ValueError("drop_short_tones_ms must not be negative")
+    if config.unit_candidate_spread < 0:
+        raise ValueError("unit_candidate_spread must not be negative")
+    if config.unit_candidate_steps < 1:
+        raise ValueError("unit_candidate_steps must be positive")
+    if config.punctuation_penalty < 0:
+        raise ValueError("punctuation_penalty must not be negative")
     if config.min_separation_hz <= 0:
         raise ValueError("min_separation_hz must be positive")
     if config.peak_min_separation_hz is not None and config.peak_min_separation_hz <= 0:

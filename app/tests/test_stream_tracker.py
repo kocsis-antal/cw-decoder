@@ -139,3 +139,42 @@ def test_carrier_tracker_candidate_merge_is_separate_from_track_match() -> None:
         time_s=0.0,
     )
     assert [round(carrier[0]) for carrier in merge_tracker.candidate_carriers(0.0)] == [700]
+
+
+def test_detect_frame_peaks_suppresses_flat_noise_floor_with_squelch() -> None:
+    freqs = np.arange(0, 1200, 20, dtype=np.float32)
+    spectrum = np.ones_like(freqs)
+    spectrum[np.argmin(np.abs(freqs - 700))] = 2.0
+    frame = SpectrumFrame(start_s=0.0, spectrum=spectrum, freqs=freqs)
+
+    peaks = detect_frame_peaks(
+        frame,
+        StreamingConfig(
+            min_tone_hz=200,
+            max_tone_hz=1100,
+            min_peak_snr_db=14.0,
+            max_tracks=5,
+        ),
+    )
+
+    assert peaks == []
+
+
+def test_detect_frame_peaks_keeps_clear_tone_above_squelch() -> None:
+    freqs = np.arange(0, 1200, 20, dtype=np.float32)
+    spectrum = np.ones_like(freqs)
+    spectrum[np.argmin(np.abs(freqs - 700))] = 100.0
+    frame = SpectrumFrame(start_s=0.0, spectrum=spectrum, freqs=freqs)
+
+    peaks = detect_frame_peaks(
+        frame,
+        StreamingConfig(
+            min_tone_hz=200,
+            max_tone_hz=1100,
+            min_peak_snr_db=14.0,
+            max_tracks=5,
+        ),
+    )
+
+    assert [round(peak.frequency_hz) for peak in peaks] == [700]
+    assert peaks[0].snr_db >= 14.0

@@ -20,6 +20,7 @@ class SpectralPeak:
     frequency_hz: float
     power: float
     relative_power: float
+    snr_db: float = 0.0
 
 
 @dataclass
@@ -31,6 +32,7 @@ class CarrierTrack:
     hits: int = 1
     power: float = 0.0
     max_power: float = 0.0
+    max_snr_db: float = 0.0
     state: str = "active"
 
     def observe(self, peak: SpectralPeak, smoothing: float) -> None:
@@ -40,6 +42,7 @@ class CarrierTrack:
         self.hits += 1
         self.power = peak.power
         self.max_power = max(self.max_power, peak.power)
+        self.max_snr_db = max(self.max_snr_db, peak.snr_db)
         self.state = "active"
 
     def mark_time(self, time_s: float, max_gap_s: float) -> None:
@@ -99,6 +102,7 @@ class CarrierTracker:
                         hits=1,
                         power=peak.power,
                         max_power=peak.power,
+                        max_snr_db=peak.snr_db,
                     )
                 )
                 self._next_track_id += 1
@@ -131,6 +135,8 @@ class CarrierTracker:
             relative_power = track.max_power / reference_power
             if relative_power < self.config.track_relative_threshold:
                 continue
+            if track.max_snr_db < self.config.min_peak_snr_db:
+                continue
             if any(abs(track.frequency_hz - carrier_hz) < channel_merge_hz(self.config) for carrier_hz, _r, _p in carriers):
                 continue
             carriers.append((float(track.frequency_hz), float(relative_power), float(track.max_power)))
@@ -154,6 +160,8 @@ def detect_frame_peaks(frame: SpectrumFrame, config: StreamingConfig) -> list[Sp
     if max_power <= 0:
         return []
 
+    floor_power = _spectral_floor_power(powers)
+
     candidates = _local_peak_indices(powers)
     if not candidates:
         candidates = list(range(len(powers)))
@@ -165,6 +173,9 @@ def detect_frame_peaks(frame: SpectrumFrame, config: StreamingConfig) -> list[Sp
         relative_power = power / max_power if max_power > 0 else 0.0
         if relative_power < config.peak_relative_threshold:
             continue
+        snr_db = _power_ratio_db(power, floor_power)
+        if snr_db < config.min_peak_snr_db:
+            continue
         frequency_hz = float(search_freqs[index])
         if any(abs(frequency_hz - existing.frequency_hz) < peak_min_separation_hz(config) for existing in selected):
             continue
@@ -174,8 +185,25 @@ def detect_frame_peaks(frame: SpectrumFrame, config: StreamingConfig) -> list[Sp
                 frequency_hz=frequency_hz,
                 power=power,
                 relative_power=relative_power,
+                snr_db=snr_db,
             )
         )
         if len(selected) >= config.max_tracks:
             break
     return selected
+
+
+def _spectral_floor_power(powers: np.ndarray) -> float:
+    """Robust per-frame noise floor estimate for carrier squelch."""
+
+    if len(powers) == 0:
+        return 0.0
+    return float(np.percentile(powers, 50))
+
+
+def _power_ratio_db(power: float, floor_power: float) -> float:
+    if power <= 0:
+        return float("-inf")
+    if floor_power <= 0:
+        return float("inf")
+    return float(10.0 * np.log10(power / floor_power))

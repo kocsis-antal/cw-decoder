@@ -153,6 +153,23 @@ def main() -> None:
     stream_sim_parser.add_argument("--threshold-ratio", type=float, default=0.35)
     stream_sim_parser.add_argument("--peak-relative-threshold", type=float, default=0.25)
     stream_sim_parser.add_argument("--track-relative-threshold", type=float, default=0.10)
+    stream_sim_parser.add_argument("--min-peak-snr-db", type=float, default=0.0)
+    stream_sim_parser.add_argument("--min-keying-tone-runs", type=int, default=0)
+    stream_sim_parser.add_argument("--min-keying-chars", type=int, default=0)
+    stream_sim_parser.add_argument("--min-keying-known-chars", type=int, default=0)
+    stream_sim_parser.add_argument("--min-keying-active-duration-s", type=float, default=0.0)
+    stream_sim_parser.add_argument("--min-keying-duty-cycle", type=float, default=None)
+    stream_sim_parser.add_argument("--max-keying-duty-cycle", type=float, default=None)
+    stream_sim_parser.add_argument("--min-keying-unit-s", type=float, default=0.0)
+    stream_sim_parser.add_argument("--max-keying-unit-s", type=float, default=None)
+    stream_sim_parser.add_argument("--max-keying-score", type=float, default=None)
+    stream_sim_parser.add_argument("--reject-et-only-sessions", action=argparse.BooleanOptionalAction, default=False)
+    stream_sim_parser.add_argument("--et-only-min-chars", type=int, default=3)
+    stream_sim_parser.add_argument("--merge-short-gaps-ms", type=float, default=0.0)
+    stream_sim_parser.add_argument("--drop-short-tones-ms", type=float, default=0.0)
+    stream_sim_parser.add_argument("--unit-candidate-spread", type=float, default=0.0)
+    stream_sim_parser.add_argument("--unit-candidate-steps", type=int, default=1)
+    stream_sim_parser.add_argument("--punctuation-penalty", type=float, default=0.0)
     stream_sim_parser.add_argument("--min-separation-hz", type=float, default=80.0)
     stream_sim_parser.add_argument("--peak-min-separation-hz", type=float, default=None)
     stream_sim_parser.add_argument("--track-match-hz", type=float, default=None)
@@ -177,6 +194,31 @@ def main() -> None:
     stream_sim_parser.add_argument("--updates", type=int, default=20)
     stream_sim_parser.add_argument("--events", action="store_true", help="Print channel/session lifecycle events")
     stream_sim_parser.add_argument("--json-events", action="store_true", help="Print channel/session lifecycle events as JSON Lines and suppress human tables")
+
+    stream_stdin_parser = subparsers.add_parser("stream-stdin")
+    stream_stdin_parser.add_argument("--sample-rate", type=int, required=True)
+    stream_stdin_parser.add_argument(
+        "--sample-format",
+        choices=["s16le", "s16be", "s32le", "s32be", "f32le", "f32be", "u8"],
+        default="s16le",
+    )
+    stream_stdin_parser.add_argument("--channels", type=int, default=1)
+    stream_stdin_parser.add_argument("--duration-s", type=float, default=None)
+    _add_streaming_options(stream_stdin_parser)
+    stream_stdin_parser.set_defaults(
+        min_peak_snr_db=14.0,
+        min_keying_tone_runs=3,
+        min_keying_chars=2,
+        min_keying_known_chars=2,
+        min_keying_active_duration_s=0.12,
+        min_keying_duty_cycle=0.03,
+        max_keying_duty_cycle=0.92,
+        min_keying_unit_s=0.03,
+        max_keying_score=120.0,
+        reject_et_only_sessions=True,
+        merge_short_gaps_ms=25.0,
+        drop_short_tones_ms=12.0,
+    )
 
     spacing_parser = subparsers.add_parser("spacing-benchmark")
     spacing_parser.add_argument("--text-a", default="CQ CQ DE YU7NKA")
@@ -205,6 +247,7 @@ def main() -> None:
     spacing_parser.add_argument("--stream-threshold-ratio", type=float, default=0.35)
     spacing_parser.add_argument("--peak-relative-threshold", type=float, default=0.25)
     spacing_parser.add_argument("--track-relative-threshold", type=float, default=0.10)
+    spacing_parser.add_argument("--min-peak-snr-db", type=float, default=0.0)
     spacing_parser.add_argument("--max-final-score", type=float, default=30.0)
     spacing_parser.add_argument("--disable-final-quality-filter", action="store_true")
     spacing_parser.add_argument("--shadow-suppression-hz", type=float, default=None)
@@ -604,6 +647,7 @@ def main() -> None:
             stream_threshold_ratio=args.stream_threshold_ratio,
             peak_relative_threshold=args.peak_relative_threshold,
             track_relative_threshold=args.track_relative_threshold,
+            min_peak_snr_db=args.min_peak_snr_db,
             max_final_score=None if args.disable_final_quality_filter else args.max_final_score,
             shadow_suppression_hz=args.shadow_suppression_hz,
             shadow_score_margin=args.shadow_score_margin,
@@ -639,16 +683,26 @@ def main() -> None:
             if not expectation.passed:
                 sys.exit(1)
     elif args.command == "stream-sim":
-        from cw.streaming import simulate_stream_from_wav
+        from cw.streaming import StreamProcessor, WavFileSource, simulate_stream_from_wav
 
-        result = simulate_stream_from_wav(args.wav_path, _streaming_config(args))
+        config = _streaming_config(args)
         if args.json_events:
-            from cw.stream_events import stream_result_events_to_jsonl
+            from cw.stream_events import stream_event_to_json
 
-            jsonl = stream_result_events_to_jsonl(result)
-            if jsonl:
-                print(jsonl)
+            source = WavFileSource(args.wav_path, config.input_block_ms)
+            processor = StreamProcessor(source.sample_rate, config)
+            emitted_event_count = 0
+            for block in source:
+                chunk = processor.push(block.samples)
+                for event in chunk.events:
+                    print(stream_event_to_json(event), flush=True)
+                    emitted_event_count += 1
+            result = processor.finish(final_time_s=source.duration_s)
+            for event in result.events[emitted_event_count:]:
+                print(stream_event_to_json(event), flush=True)
             return
+
+        result = simulate_stream_from_wav(args.wav_path, config)
 
         print(f"duration_s={result.duration_s:.3f}")
         print(
@@ -715,6 +769,204 @@ def main() -> None:
                         f"{session.decoded.unit_s:>4.3f} "
                         f"{_display_text(session.decoded.text)}"
                     )
+    elif args.command == "stream-stdin":
+        from cw.streaming import RawPcmStreamSource
+
+        config = _streaming_config(args)
+        source = RawPcmStreamSource(
+            sys.stdin.buffer,
+            sample_rate=args.sample_rate,
+            sample_format=args.sample_format,
+            channels=args.channels,
+            block_ms=config.input_block_ms,
+            duration_s=args.duration_s,
+        )
+        if args.json_events:
+            _print_stream_json_events(source, config)
+            return
+
+        result = _run_live_human_stream(source, config, args)
+        _print_stream_summary(result, args)
+
+
+
+def _add_streaming_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--input-block-ms", type=float, default=10.0)
+    parser.add_argument("--frame-ms", type=float, default=30.0)
+    parser.add_argument("--hop-ms", type=float, default=5.0)
+    parser.add_argument("--tracker-frame-ms", type=float, default=None)
+    parser.add_argument("--tracker-hop-ms", type=float, default=None)
+    parser.add_argument("--min-tone-hz", type=float, default=200.0)
+    parser.add_argument("--max-tone-hz", type=float, default=2000.0)
+    parser.add_argument("--bandwidth-hz", type=float, default=40.0)
+    parser.add_argument("--threshold-ratio", type=float, default=0.35)
+    parser.add_argument("--peak-relative-threshold", type=float, default=0.25)
+    parser.add_argument("--track-relative-threshold", type=float, default=0.10)
+    parser.add_argument("--min-peak-snr-db", type=float, default=0.0, help="Require each carrier peak to rise this many dB above the per-frame spectral floor")
+    parser.add_argument("--min-keying-tone-runs", type=int, default=0, help="Require this many tone runs before a carrier/session is published")
+    parser.add_argument("--min-keying-chars", type=int, default=0, help="Require this many decoded non-space characters before a carrier/session is published")
+    parser.add_argument("--min-keying-known-chars", type=int, default=0, help="Require this many decoded non-? characters before a carrier/session is published")
+    parser.add_argument("--min-keying-active-duration-s", type=float, default=0.0, help="Require this much total keyed tone duration before publishing")
+    parser.add_argument("--min-keying-duty-cycle", type=float, default=None, help="Reject sessions with lower keyed duty cycle when set")
+    parser.add_argument("--max-keying-duty-cycle", type=float, default=None, help="Reject sessions with higher keyed duty cycle when set")
+    parser.add_argument("--min-keying-unit-s", type=float, default=0.0, help="Reject unrealistically fast keying unit estimates below this value")
+    parser.add_argument("--max-keying-unit-s", type=float, default=None, help="Reject unrealistically slow keying unit estimates above this value when set")
+    parser.add_argument("--max-keying-score", type=float, default=None, help="Reject sessions with worse quality score before publishing when set")
+    parser.add_argument("--reject-et-only-sessions", action=argparse.BooleanOptionalAction, default=False, help="Reject sessions made only of repeated E/T characters")
+    parser.add_argument("--et-only-min-chars", type=int, default=3, help="Minimum length for the repeated E/T-only rejection")
+    parser.add_argument("--merge-short-gaps-ms", type=float, default=0.0, help="Merge short off-gaps inside a tone; useful for live dropout repair")
+    parser.add_argument("--drop-short-tones-ms", type=float, default=0.0, help="Drop very short tone spikes before decoding")
+    parser.add_argument("--unit-candidate-spread", type=float, default=0.0, help="Try neighbouring unit estimates around the initial WPM guess")
+    parser.add_argument("--unit-candidate-steps", type=int, default=1, help="Number of unit hypotheses to score when unit-candidate-spread is set")
+    parser.add_argument("--punctuation-penalty", type=float, default=0.0, help="Softly prefer alphanumeric text over punctuation when choosing a unit hypothesis")
+    parser.add_argument("--min-separation-hz", type=float, default=80.0)
+    parser.add_argument("--peak-min-separation-hz", type=float, default=None)
+    parser.add_argument("--track-match-hz", type=float, default=None)
+    parser.add_argument("--channel-merge-hz", type=float, default=None)
+    parser.add_argument("--max-tracks", type=int, default=5)
+    parser.add_argument("--max-track-gap-s", type=float, default=2.0)
+    parser.add_argument("--carrier-smoothing", type=float, default=0.20)
+    parser.add_argument("--min-track-hits", type=int, default=2)
+    parser.add_argument("--emit-interval-s", type=float, default=0.50)
+    parser.add_argument("--min-update-score", type=float, default=25.0)
+    parser.add_argument("--max-final-score", type=float, default=30.0)
+    parser.add_argument("--disable-final-quality-filter", action="store_true")
+    parser.add_argument("--shadow-suppression-hz", type=float, default=None)
+    parser.add_argument("--shadow-score-margin", type=float, default=15.0)
+    parser.add_argument("--session-gap-units", type=float, default=20.0)
+    parser.add_argument("--min-session-gap-s", type=float, default=1.20)
+    parser.add_argument("--history-margin-s", type=float, default=0.25)
+    parser.add_argument("--active-history-margin-s", type=float, default=None)
+    parser.add_argument("--no-prune-finalized-sessions", action="store_true")
+    parser.add_argument("--prune-committed-active-sessions", action="store_true")
+    parser.add_argument("--raw-updates", action="store_true")
+    parser.add_argument("--updates", type=int, default=20)
+    parser.add_argument("--events", action="store_true", help="Print channel/session lifecycle events")
+    parser.add_argument(
+        "--json-events",
+        action="store_true",
+        help="Print channel/session lifecycle events as JSON Lines and suppress human tables",
+    )
+
+
+def _print_stream_json_events(source, config) -> None:
+    from cw.stream_events import stream_event_to_json
+    from cw.streaming import StreamProcessor
+
+    processor = StreamProcessor(source.sample_rate, config)
+    emitted_event_count = 0
+    try:
+        for block in source:
+            if block.sample_rate != source.sample_rate:
+                raise ValueError("audio block sample_rate changed during stream")
+            chunk = processor.push(block.samples)
+            for event in chunk.events:
+                print(stream_event_to_json(event), flush=True)
+                emitted_event_count += 1
+    except KeyboardInterrupt:
+        print("stream interrupted; finalizing", file=sys.stderr)
+
+    final_time_s = source.duration_s if source.duration_s is not None else processor.processed_duration_s
+    result = processor.finish(final_time_s=final_time_s)
+    for event in result.events[emitted_event_count:]:
+        print(stream_event_to_json(event), flush=True)
+
+
+def _run_live_human_stream(source, config, args):
+    from cw.streaming import StreamProcessor
+
+    processor = StreamProcessor(source.sample_rate, config)
+    try:
+        for block in source:
+            if block.sample_rate != source.sample_rate:
+                raise ValueError("audio block sample_rate changed during stream")
+            chunk = processor.push(block.samples)
+            for update in chunk.updates:
+                print(_format_update_line(update), flush=True)
+            if args.events:
+                for event in chunk.events:
+                    print(_format_event_line(event), flush=True)
+    except KeyboardInterrupt:
+        print("stream interrupted; finalizing", file=sys.stderr)
+
+    final_time_s = source.duration_s if source.duration_s is not None else processor.processed_duration_s
+    return processor.finish(final_time_s=final_time_s)
+
+
+def _print_stream_summary(result, args) -> None:
+    print(f"duration_s={result.duration_s:.3f}")
+    print(
+        f"frames_processed={result.frames_processed} "
+        f"tracker_frames_processed={result.tracker_frames_processed} "
+        f"retained_frames={result.retained_frames} "
+        f"pruned_frames={result.pruned_frames} "
+        f"active_pruned_frames={result.active_pruned_frames} "
+        f"finalized_pruned_frames={result.finalized_pruned_frames}"
+    )
+    print(f"updates={len(result.updates)}")
+    for update in result.updates[: args.updates]:
+        print(_format_update_line(update))
+    if len(result.updates) > args.updates:
+        print(f"... {len(result.updates) - args.updates} more updates")
+    if args.events:
+        print("events:")
+        for event in result.events:
+            print(_format_event_line(event))
+    print("final:")
+    print("track carrier_hz first_seen last_seen hits score unit text")
+    for track in result.tracks:
+        print(
+            f"{track.track_id:>5} "
+            f"{track.carrier_hz:>10.1f} "
+            f"{track.first_seen_s:>10.3f} "
+            f"{track.last_seen_s:>9.3f} "
+            f"{track.hits:>4} "
+            f"{track.quality.score:>5.1f} "
+            f"{track.decoded.unit_s:>4.3f} "
+            f"{_display_track_text(track)}"
+        )
+    if _has_multiple_sessions(result.tracks) or args.events:
+        print("sessions:")
+        print("channel session first last final reason score unit text")
+        for track in result.tracks:
+            for session in track.sessions:
+                print(
+                    f"{track.track_id:>7} "
+                    f"{session.session_id:>7} "
+                    f"{session.first_seen_s:>5.3f} "
+                    f"{session.last_seen_s:>5.3f} "
+                    f"{session.final_time_s:>5.3f} "
+                    f"{session.final_reason:<13} "
+                    f"{session.quality.score:>5.1f} "
+                    f"{session.decoded.unit_s:>4.3f} "
+                    f"{_display_text(session.decoded.text)}"
+                )
+
+
+def _format_update_line(update) -> str:
+    return (
+        f"t={update.time_s:>7.3f}s "
+        f"track={update.track_id:<2} "
+        f"session={update.session_id:<2} "
+        f"carrier={update.carrier_hz:>7.1f}Hz "
+        f"score={update.score:>6.1f} "
+        f"text={_display_text(update.text)}"
+    )
+
+
+def _format_event_line(event) -> str:
+    session = "-" if event.session_id is None else str(event.session_id)
+    reason = f" reason={event.reason}" if event.reason else ""
+    text = f" text={_display_text(event.text)}" if event.text else ""
+    score = f" score={event.score:.1f}" if event.score else ""
+    return (
+        f"t={event.time_s:>7.3f}s "
+        f"channel={event.channel_id:<2} "
+        f"session={session:<2} "
+        f"carrier={event.carrier_hz:>7.1f}Hz "
+        f"kind={event.kind}"
+        f"{score}{reason}{text}"
+    )
 
 
 def _add_carrier_detection_options(parser: argparse.ArgumentParser) -> None:
@@ -778,6 +1030,23 @@ def _streaming_config(args: argparse.Namespace):
         threshold_ratio=args.threshold_ratio,
         peak_relative_threshold=args.peak_relative_threshold,
         track_relative_threshold=args.track_relative_threshold,
+        min_peak_snr_db=args.min_peak_snr_db,
+        min_keying_tone_runs=args.min_keying_tone_runs,
+        min_keying_chars=args.min_keying_chars,
+        min_keying_known_chars=args.min_keying_known_chars,
+        min_keying_active_duration_s=args.min_keying_active_duration_s,
+        min_keying_duty_cycle=args.min_keying_duty_cycle,
+        max_keying_duty_cycle=args.max_keying_duty_cycle,
+        min_keying_unit_s=args.min_keying_unit_s,
+        max_keying_unit_s=args.max_keying_unit_s,
+        max_keying_score=args.max_keying_score,
+        reject_et_only_sessions=args.reject_et_only_sessions,
+        et_only_min_chars=args.et_only_min_chars,
+        merge_short_gaps_ms=args.merge_short_gaps_ms,
+        drop_short_tones_ms=args.drop_short_tones_ms,
+        unit_candidate_spread=args.unit_candidate_spread,
+        unit_candidate_steps=args.unit_candidate_steps,
+        punctuation_penalty=args.punctuation_penalty,
         min_separation_hz=args.min_separation_hz,
         peak_min_separation_hz=args.peak_min_separation_hz,
         track_match_hz=args.track_match_hz,

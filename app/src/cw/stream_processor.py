@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 
@@ -9,10 +10,10 @@ from cw.decoder import (
     DecodeResult,
     DetectedRun,
     _to_mono_float,
-    read_wav_mono,
 )
 from cw.stream_decode import decode_carrier_sessions_from_frames, detect_accumulated_carriers
 from cw.stream_filter import filter_final_tracks
+from cw.stream_keying import filter_keyed_sessions
 from cw.stream_models import (
     SpectrumFrame,
     StreamChunkResult,
@@ -28,6 +29,7 @@ from cw.stream_models import (
     validate_streaming_config,
 )
 from cw.stream_state import ChannelRegistry
+from cw.stream_sources import ArrayAudioSource, AudioSource, WavFileSource
 from cw.stream_stft import StreamingSTFT
 from cw.stream_tracker import CarrierTracker
 
@@ -182,19 +184,37 @@ class StreamProcessor:
 
 def simulate_stream_from_wav(path: Path, config: StreamingConfig | None = None) -> StreamSimulationResult:
     config = config or StreamingConfig()
-    signal, sample_rate = read_wav_mono(path)
-    return simulate_stream(signal, sample_rate, config)
+    return process_audio_source(WavFileSource(path, config.input_block_ms), config)
 
 
 def simulate_stream(signal: np.ndarray, sample_rate: int, config: StreamingConfig | None = None) -> StreamSimulationResult:
     config = config or StreamingConfig()
-    signal = _to_mono_float(signal)
-    processor = StreamProcessor(sample_rate, config)
+    return process_audio_source(ArrayAudioSource(signal, sample_rate, config.input_block_ms), config)
 
-    block_length = max(1, round(sample_rate * config.input_block_ms / 1000))
-    for start in range(0, len(signal), block_length):
-        processor.push(signal[start : start + block_length])
-    return processor.finish(final_time_s=len(signal) / sample_rate if sample_rate else 0.0)
+
+def process_audio_source(
+    source: AudioSource,
+    config: StreamingConfig | None = None,
+    on_chunk: Callable[[StreamChunkResult], None] | None = None,
+) -> StreamSimulationResult:
+    """Feed any block-based audio source into ``StreamProcessor``.
+
+    ``on_chunk`` is called after each push with only the newly emitted updates
+    and events.  This keeps replay, future microphone input, and test fixtures on
+    the same path while still returning the final accumulated result at EOF.
+    """
+
+    config = config or StreamingConfig()
+    processor = StreamProcessor(source.sample_rate, config)
+
+    for block in source:
+        if block.sample_rate != source.sample_rate:
+            raise ValueError("audio block sample_rate changed during stream")
+        chunk = processor.push(block.samples)
+        if on_chunk is not None:
+            on_chunk(chunk)
+
+    return processor.finish(final_time_s=source.duration_s)
 
 
 def _prune_stream_frames(
@@ -235,8 +255,20 @@ def _updates_from_frames(
     updates: list[StreamUpdate] = []
     candidates = carriers if carriers is not None else detect_accumulated_carriers(frames, config)
     for carrier_hz, _relative_power, _power in candidates:
-        track = registry.channel_for(carrier_hz, time_s)
-        sessions = decode_carrier_sessions_from_frames(frames, track.carrier_hz, config, time_s)
+        sessions = filter_keyed_sessions(
+            decode_carrier_sessions_from_frames(frames, carrier_hz, config, time_s),
+            config,
+        )
+        if not sessions:
+            continue
+        track = registry.channel_for(carrier_hz, sessions[0].first_seen_s)
+        if abs(track.carrier_hz - carrier_hz) > 1e-9:
+            sessions = filter_keyed_sessions(
+                decode_carrier_sessions_from_frames(frames, track.carrier_hz, config, time_s),
+                config,
+            )
+            if not sessions:
+                continue
         active_session = registry.sync_sessions(track, sessions)
         if active_session is None or not active_session.decoded.text:
             continue
@@ -283,13 +315,30 @@ def _final_tracks_from_frames(
 
     candidates = _merge_final_carriers(registry, carriers if carriers is not None else detect_accumulated_carriers(frames, config))
     for carrier_hz, _relative_power, _power in candidates:
-        track = registry.channel_for(carrier_hz, final_time_s)
-        sessions = decode_carrier_sessions_from_frames(
-            frames,
-            track.carrier_hz,
+        sessions = filter_keyed_sessions(
+            decode_carrier_sessions_from_frames(
+                frames,
+                carrier_hz,
+                config,
+                final_time_s,
+            ),
             config,
-            final_time_s,
         )
+        if not sessions:
+            continue
+        track = registry.channel_for(carrier_hz, sessions[0].first_seen_s)
+        if abs(track.carrier_hz - carrier_hz) > 1e-9:
+            sessions = filter_keyed_sessions(
+                decode_carrier_sessions_from_frames(
+                    frames,
+                    track.carrier_hz,
+                    config,
+                    final_time_s,
+                ),
+                config,
+            )
+            if not sessions:
+                continue
         active_session = registry.sync_sessions(track, sessions)
         if active_session is not None and active_session.decoded.text:
             active_sessions_by_track_id[track.track_id] = active_session

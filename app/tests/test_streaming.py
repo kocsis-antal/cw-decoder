@@ -171,3 +171,21 @@ def test_stream_sim_can_use_longer_tracker_fft_than_decode_fft(tmp_path: Path) -
     assert "CQ DE YU7NKA" in texts
     assert "CQ DE YT7MK" in texts
     assert result.frames_processed > result.tracker_frames_processed > 0
+
+
+def test_stream_squelch_suppresses_white_noise() -> None:
+    import numpy as np
+
+    from cw.streaming import StreamingConfig, simulate_stream
+
+    rng = np.random.default_rng(123)
+    noise = rng.normal(0.0, 0.02, 8000 * 4).astype(np.float32)
+
+    result = simulate_stream(
+        noise,
+        8000,
+        StreamingConfig(input_block_ms=10.0, min_peak_snr_db=14.0),
+    )
+
+    assert result.tracks == []
+    assert result.events == []
