@@ -142,6 +142,45 @@ def main() -> None:
     contest_live_multi_parser.add_argument("--consensus-top", type=int, default=3)
     _add_carrier_detection_options(contest_live_multi_parser)
 
+
+    decode_raw_parser = subparsers.add_parser("decode-raw")
+    decode_raw_parser.add_argument("raw_path", type=Path)
+    decode_raw_parser.add_argument("--sample-rate", type=int, default=8000)
+    decode_raw_parser.add_argument(
+        "--sample-format",
+        choices=["s16le", "s16be", "s32le", "s32be", "f32le", "f32be", "u8"],
+        default="s16le",
+    )
+    decode_raw_parser.add_argument("--channels", type=int, default=1)
+    decode_raw_parser.add_argument("--start-s", type=float, default=0.0)
+    decode_raw_parser.add_argument("--duration-s", type=float, default=None)
+    decode_raw_parser.add_argument("--carrier", action="append", type=float, default=[])
+    decode_raw_parser.add_argument("--detect-carriers", type=int, default=5)
+    decode_raw_parser.add_argument("--min-tone-hz", type=float, default=200.0)
+    decode_raw_parser.add_argument("--max-tone-hz", type=float, default=3000.0)
+    decode_raw_parser.add_argument("--min-separation-hz", type=float, default=80.0)
+    decode_raw_parser.add_argument("--peak-relative-threshold", type=float, default=0.10)
+    decode_raw_parser.add_argument("--detect-frame-ms", type=float, default=80.0)
+    decode_raw_parser.add_argument("--detect-hop-ms", type=float, default=10.0)
+    decode_raw_parser.add_argument("--lowpass-ms", type=float, default=12.0)
+    decode_raw_parser.add_argument("--envelope-hop-ms", type=float, default=5.0)
+    decode_raw_parser.add_argument("--threshold-ratios", default="0.12,0.16,0.20,0.25,0.30,0.35,0.40,0.45")
+    decode_raw_parser.add_argument("--merge-short-gaps-ms", type=float, default=25.0)
+    decode_raw_parser.add_argument("--drop-short-tones-ms", type=float, default=12.0)
+    decode_raw_parser.add_argument("--unit-candidate-spread", type=float, default=0.12)
+    decode_raw_parser.add_argument("--unit-candidate-steps", type=int, default=5)
+    decode_raw_parser.add_argument("--adaptive-gap-thresholds", action=argparse.BooleanOptionalAction, default=True)
+    decode_raw_parser.add_argument("--element-letter-gap-units", type=float, default=2.0)
+    decode_raw_parser.add_argument("--default-word-gap-units", type=float, default=7.0)
+    decode_raw_parser.add_argument("--gap-cluster-min-ratio", type=float, default=1.45)
+    decode_raw_parser.add_argument("--gap-cluster-min-delta-units", type=float, default=1.0)
+    decode_raw_parser.add_argument("--gap-cluster-min-lower-count", type=int, default=2)
+    decode_raw_parser.add_argument("--session-gap-s", type=float, default=1.2)
+    decode_raw_parser.add_argument("--min-session-evidence-score", type=float, default=0.0)
+    decode_raw_parser.add_argument("--max-candidates-per-carrier", type=int, default=6)
+    decode_raw_parser.add_argument("--max-candidates-per-session", type=int, default=4)
+    decode_raw_parser.add_argument("--json", action="store_true", help="Print one machine-readable JSON report")
+
     analyze_raw_parser = subparsers.add_parser("analyze-raw")
     analyze_raw_parser.add_argument("raw_path", type=Path)
     analyze_raw_parser.add_argument("--sample-rate", type=int, required=True)
@@ -162,7 +201,7 @@ def main() -> None:
     analyze_raw_parser.add_argument("--frame-ms", type=float, default=30.0)
     analyze_raw_parser.add_argument("--hop-ms", type=float, default=5.0)
     analyze_raw_parser.add_argument("--bandwidth-hz", type=float, default=40.0)
-    analyze_raw_parser.add_argument("--threshold-ratios", default="0.20,0.25,0.30,0.35,0.40,0.45")
+    analyze_raw_parser.add_argument("--threshold-ratios", default="0.12,0.16,0.20,0.25,0.30,0.35,0.40,0.45")
     analyze_raw_parser.add_argument("--adaptive-gap-thresholds", action=argparse.BooleanOptionalAction, default=True)
     analyze_raw_parser.add_argument("--element-letter-gap-units", type=float, default=2.0)
     analyze_raw_parser.add_argument("--default-word-gap-units", type=float, default=7.0)
@@ -179,68 +218,18 @@ def main() -> None:
 
     stream_sim_parser = subparsers.add_parser("stream-sim")
     stream_sim_parser.add_argument("wav_path", type=Path)
-    stream_sim_parser.add_argument("--input-block-ms", type=float, default=10.0)
-    stream_sim_parser.add_argument("--frame-ms", type=float, default=30.0)
-    stream_sim_parser.add_argument("--hop-ms", type=float, default=5.0)
-    stream_sim_parser.add_argument("--tracker-frame-ms", type=float, default=None)
-    stream_sim_parser.add_argument("--tracker-hop-ms", type=float, default=None)
-    stream_sim_parser.add_argument("--max-history-s", type=float, default=None)
-    stream_sim_parser.add_argument("--max-idle-history-s", type=float, default=None)
-    stream_sim_parser.add_argument("--min-tone-hz", type=float, default=200.0)
-    stream_sim_parser.add_argument("--max-tone-hz", type=float, default=2000.0)
-    stream_sim_parser.add_argument("--bandwidth-hz", type=float, default=40.0)
-    stream_sim_parser.add_argument("--threshold-ratio", type=float, default=0.35)
-    stream_sim_parser.add_argument("--threshold-ratios", default="")
-    stream_sim_parser.add_argument("--adaptive-gap-thresholds", action=argparse.BooleanOptionalAction, default=True)
-    stream_sim_parser.add_argument("--element-letter-gap-units", type=float, default=2.0)
-    stream_sim_parser.add_argument("--default-word-gap-units", type=float, default=7.0)
-    stream_sim_parser.add_argument("--gap-cluster-min-ratio", type=float, default=1.45)
-    stream_sim_parser.add_argument("--gap-cluster-min-delta-units", type=float, default=1.0)
-    stream_sim_parser.add_argument("--gap-cluster-min-lower-count", type=int, default=2)
-    stream_sim_parser.add_argument("--peak-relative-threshold", type=float, default=0.25)
-    stream_sim_parser.add_argument("--track-relative-threshold", type=float, default=0.10)
-    stream_sim_parser.add_argument("--min-peak-snr-db", type=float, default=0.0)
-    stream_sim_parser.add_argument("--min-keying-tone-runs", type=int, default=0)
-    stream_sim_parser.add_argument("--min-keying-chars", type=int, default=0)
-    stream_sim_parser.add_argument("--min-keying-known-chars", type=int, default=0)
-    stream_sim_parser.add_argument("--min-keying-active-duration-s", type=float, default=0.0)
-    stream_sim_parser.add_argument("--min-keying-duty-cycle", type=float, default=None)
-    stream_sim_parser.add_argument("--max-keying-duty-cycle", type=float, default=None)
-    stream_sim_parser.add_argument("--min-keying-unit-s", type=float, default=0.0)
-    stream_sim_parser.add_argument("--max-keying-unit-s", type=float, default=None)
-    stream_sim_parser.add_argument("--max-keying-score", type=float, default=None)
-    stream_sim_parser.add_argument("--reject-et-only-sessions", action=argparse.BooleanOptionalAction, default=False)
-    stream_sim_parser.add_argument("--et-only-min-chars", type=int, default=3)
-    stream_sim_parser.add_argument("--merge-short-gaps-ms", type=float, default=0.0)
-    stream_sim_parser.add_argument("--drop-short-tones-ms", type=float, default=0.0)
-    stream_sim_parser.add_argument("--unit-candidate-spread", type=float, default=0.0)
-    stream_sim_parser.add_argument("--unit-candidate-steps", type=int, default=1)
-    stream_sim_parser.add_argument("--punctuation-penalty", type=float, default=0.0)
-    stream_sim_parser.add_argument("--min-separation-hz", type=float, default=80.0)
-    stream_sim_parser.add_argument("--peak-min-separation-hz", type=float, default=None)
-    stream_sim_parser.add_argument("--track-match-hz", type=float, default=None)
-    stream_sim_parser.add_argument("--channel-merge-hz", type=float, default=None)
-    stream_sim_parser.add_argument("--max-tracks", type=int, default=5)
-    stream_sim_parser.add_argument("--max-track-gap-s", type=float, default=2.0)
-    stream_sim_parser.add_argument("--carrier-smoothing", type=float, default=0.20)
-    stream_sim_parser.add_argument("--min-track-hits", type=int, default=2)
-    stream_sim_parser.add_argument("--emit-interval-s", type=float, default=0.50)
-    stream_sim_parser.add_argument("--min-update-score", type=float, default=25.0)
-    stream_sim_parser.add_argument("--final-text-regression-margin", type=float, default=10.0)
-    stream_sim_parser.add_argument("--max-final-score", type=float, default=30.0)
-    stream_sim_parser.add_argument("--disable-final-quality-filter", action="store_true")
-    stream_sim_parser.add_argument("--shadow-suppression-hz", type=float, default=None)
-    stream_sim_parser.add_argument("--shadow-score-margin", type=float, default=15.0)
-    stream_sim_parser.add_argument("--session-gap-units", type=float, default=20.0)
-    stream_sim_parser.add_argument("--min-session-gap-s", type=float, default=1.20)
-    stream_sim_parser.add_argument("--history-margin-s", type=float, default=0.25)
-    stream_sim_parser.add_argument("--active-history-margin-s", type=float, default=None)
-    stream_sim_parser.add_argument("--no-prune-finalized-sessions", action="store_true")
-    stream_sim_parser.add_argument("--prune-committed-active-sessions", action="store_true")
-    stream_sim_parser.add_argument("--raw-updates", action="store_true")
-    stream_sim_parser.add_argument("--updates", type=int, default=20)
-    stream_sim_parser.add_argument("--events", action="store_true", help="Print channel/session lifecycle events")
-    stream_sim_parser.add_argument("--json-events", action="store_true", help="Print channel/session lifecycle events as JSON Lines and suppress human tables")
+    _add_streaming_options(stream_sim_parser)
+    stream_sim_parser.set_defaults(
+        max_tone_hz=3000.0,
+        threshold_ratios="0.12,0.16,0.20,0.25,0.30,0.35,0.40,0.45",
+        merge_short_gaps_ms=25.0,
+        drop_short_tones_ms=12.0,
+        tracker_frame_ms=80.0,
+        tracker_hop_ms=10.0,
+        max_history_s=60.0,
+        max_idle_history_s=20.0,
+        finalization_delay_s=1.0,
+    )
 
     stream_stdin_parser = subparsers.add_parser("stream-stdin")
     stream_stdin_parser.add_argument("--sample-rate", type=int, required=True)
@@ -280,7 +269,7 @@ def main() -> None:
         max_keying_duty_cycle=0.92,
         min_keying_unit_s=0.03,
         max_keying_score=120.0,
-        threshold_ratios="0.20,0.25,0.30,0.35,0.40,0.45",
+        threshold_ratios="0.12,0.16,0.20,0.25,0.30,0.35,0.40,0.45",
         reject_et_only_sessions=True,
         merge_short_gaps_ms=25.0,
         drop_short_tones_ms=12.0,
@@ -319,7 +308,7 @@ def main() -> None:
         max_keying_duty_cycle=0.92,
         min_keying_unit_s=0.03,
         max_keying_score=120.0,
-        threshold_ratios="0.20,0.25,0.30,0.35,0.40,0.45",
+        threshold_ratios="0.12,0.16,0.20,0.25,0.30,0.35,0.40,0.45",
         reject_et_only_sessions=True,
         merge_short_gaps_ms=25.0,
         drop_short_tones_ms=12.0,

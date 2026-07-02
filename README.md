@@ -585,3 +585,45 @@ TU
 You can make it harsher with the same streaming path by changing presets, adding
 mix noise, or running two generated QSOs in parallel with `generate-multi` or the
 `qso_generator` helpers used by the tests.
+
+## Next-generation raw decoder
+
+`decode-raw` is the first carrier-centric decoder path.  It is intended to
+become the default decoder core after it has enough live-regression coverage.
+Unlike the streaming STFT decoder, it demodulates each carrier separately:
+
+```text
+raw PCM -> carrier detection -> per-carrier baseband mix -> low-pass envelope
+        -> confidence-bearing tone/gap runs -> unit candidates -> decoded text
+```
+
+It is deliberately content-neutral.  It does not reward `CQ`, `DE`, callsigns,
+Q-codes or contest exchanges.  Candidate selection uses timing quality,
+envelope confidence, known-character evidence and uncertainty penalties.
+
+Example with automatic carrier detection:
+
+```bash
+python -m cw.cli decode-raw samples/live/20260702-184936.s16le
+```
+
+Example with explicit carriers and a slice:
+
+```bash
+python -m cw.cli decode-raw samples/live/20260702-184936.s16le \
+  --start-s 18 \
+  --duration-s 18 \
+  --carrier 600 \
+  --carrier 1600
+```
+
+The output is session-oriented: one carrier may contain several timed
+transmissions, and each session keeps its own ranked threshold/unit candidates.
+This avoids treating a long capture as a single huge text blob.
+
+Useful tuning knobs are intentionally generic: `--session-gap-s` controls how
+large a carrier-local silence splits sessions, and `--min-session-evidence-score`
+suppresses tiny low-evidence fragments. The raw defaults match the current live
+capture workflow: `--sample-rate 8000`, `--sample-format s16le`,
+`--max-tone-hz 3000`, dynamic threshold candidates and short dropout repair are
+all enabled without extra arguments.

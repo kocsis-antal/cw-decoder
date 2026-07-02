@@ -4,11 +4,7 @@ import sys
 
 from cw.cli_format import (
     _display_text,
-    _display_track_text,
     _format_config,
-    _format_event_line,
-    _format_update_line,
-    _has_multiple_sessions,
 )
 from cw.cli_options import _carrier_detection_config, _decoder_config, _streaming_config
 from cw.cli_stream import _print_stream_json_events, _print_stream_summary, _run_live_human_stream
@@ -437,6 +433,46 @@ def run_cli_command(args) -> None:
                 print(f"expectation_failure={failure}")
             if not expectation.passed:
                 sys.exit(1)
+
+    elif args.command == "decode-raw":
+        from cw.nextgen import decode_raw_file_nextgen, format_decode_report, report_to_json
+        from cw.prob_analysis import parse_float_csv
+
+        report = decode_raw_file_nextgen(
+            args.raw_path,
+            sample_rate=args.sample_rate,
+            sample_format=args.sample_format,
+            channels=args.channels,
+            start_s=args.start_s,
+            duration_s=args.duration_s,
+            carriers=tuple(args.carrier or ()),
+            detect_carriers=args.detect_carriers,
+            min_tone_hz=args.min_tone_hz,
+            max_tone_hz=args.max_tone_hz,
+            min_separation_hz=args.min_separation_hz,
+            peak_relative_threshold=args.peak_relative_threshold,
+            detect_frame_ms=args.detect_frame_ms,
+            detect_hop_ms=args.detect_hop_ms,
+            lowpass_ms=args.lowpass_ms,
+            envelope_hop_ms=args.envelope_hop_ms,
+            threshold_ratios=parse_float_csv(args.threshold_ratios),
+            merge_short_gaps_ms=args.merge_short_gaps_ms,
+            drop_short_tones_ms=args.drop_short_tones_ms,
+            unit_candidate_spread=args.unit_candidate_spread,
+            unit_candidate_steps=args.unit_candidate_steps,
+            adaptive_gap_thresholds=args.adaptive_gap_thresholds,
+            element_letter_gap_units=args.element_letter_gap_units,
+            default_word_gap_units=args.default_word_gap_units,
+            gap_cluster_min_ratio=args.gap_cluster_min_ratio,
+            gap_cluster_min_delta_units=args.gap_cluster_min_delta_units,
+            gap_cluster_min_lower_count=args.gap_cluster_min_lower_count,
+            session_gap_s=args.session_gap_s,
+            min_session_evidence_score=args.min_session_evidence_score,
+            max_candidates_per_carrier=args.max_candidates_per_carrier,
+            max_candidates_per_session=args.max_candidates_per_session,
+        )
+        print(report_to_json(report) if args.json else format_decode_report(report))
+
     elif args.command == "analyze-raw":
         from cw.prob_analysis import analyze_raw_file, format_human_report, parse_float_csv, report_to_json
 
@@ -473,74 +509,18 @@ def run_cli_command(args) -> None:
         print(report_to_json(report) if args.json else format_human_report(report))
 
     elif args.command == "stream-sim":
-        from cw.streaming import StreamProcessor, WavFileSource, simulate_stream_from_wav
+        from cw.streaming import WavFileSource
 
         config = _streaming_config(args)
+        source = WavFileSource(args.wav_path, config.input_block_ms)
         if args.json_events:
-            from cw.stream_events import stream_event_to_json
-
-            source = WavFileSource(args.wav_path, config.input_block_ms)
-            processor = StreamProcessor(source.sample_rate, config)
-            emitted_event_count = 0
-            for block in source:
-                chunk = processor.push(block.samples)
-                for event in chunk.events:
-                    print(stream_event_to_json(event), flush=True)
-                    emitted_event_count += 1
-            result = processor.finish(final_time_s=source.duration_s)
-            for event in result.events[emitted_event_count:]:
-                print(stream_event_to_json(event), flush=True)
+            _print_stream_json_events(source, config, args)
             return
 
-        result = simulate_stream_from_wav(args.wav_path, config)
-
-        print(f"duration_s={result.duration_s:.3f}")
-        print(
-            f"frames_processed={result.frames_processed} "
-            f"tracker_frames_processed={result.tracker_frames_processed} "
-            f"retained_frames={result.retained_frames} "
-            f"pruned_frames={result.pruned_frames} "
-            f"active_pruned_frames={result.active_pruned_frames} "
-            f"finalized_pruned_frames={result.finalized_pruned_frames}"
-        )
-        print(f"updates={len(result.updates)}")
-        for update in result.updates[: args.updates]:
-            print(_format_update_line(update))
-        if len(result.updates) > args.updates:
-            print(f"... {len(result.updates) - args.updates} more updates")
-        if args.events:
-            print("events:")
-            for event in result.events:
-                print(_format_event_line(event))
-        print("final:")
-        print("track carrier_hz first_seen last_seen hits score unit text")
-        for track in result.tracks:
-            print(
-                f"{track.track_id:>5} "
-                f"{track.carrier_hz:>10.1f} "
-                f"{track.first_seen_s:>10.3f} "
-                f"{track.last_seen_s:>9.3f} "
-                f"{track.hits:>4} "
-                f"{track.quality.score:>5.1f} "
-                f"{track.decoded.unit_s:>4.3f} "
-                f"{_display_track_text(track)}"
-            )
-        if _has_multiple_sessions(result.tracks) or args.events:
-            print("sessions:")
-            print("channel session first last final reason score unit text")
-            for track in result.tracks:
-                for session in track.sessions:
-                    print(
-                        f"{track.track_id:>7} "
-                        f"{session.session_id:>7} "
-                        f"{session.first_seen_s:>5.3f} "
-                        f"{session.last_seen_s:>5.3f} "
-                        f"{session.final_time_s:>5.3f} "
-                        f"{session.final_reason:<13} "
-                        f"{session.quality.score:>5.1f} "
-                        f"{session.decoded.unit_s:>4.3f} "
-                        f"{_display_text(session.decoded.text)}"
-                    )
+        result = _run_live_human_stream(source, config, args)
+        if result is None:
+            return
+        _print_stream_summary(result, args)
     elif args.command == "stream-stdin":
         from cw.streaming import RawPcmStreamSource
 

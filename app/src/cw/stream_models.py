@@ -18,7 +18,7 @@ class StreamingConfig:
     max_history_s: float | None = None
     max_idle_history_s: float | None = None
     min_tone_hz: float = 200.0
-    max_tone_hz: float = 2000.0
+    max_tone_hz: float = 3000.0
     bandwidth_hz: float = 40.0
     threshold_ratio: float = 0.35
     threshold_ratios: tuple[float, ...] = ()
@@ -51,6 +51,8 @@ class StreamingConfig:
     peak_min_separation_hz: float | None = None
     track_match_hz: float | None = None
     channel_merge_hz: float | None = None
+    channel_reacquire_hz: float | None = None
+    channel_reacquire_s: float = 15.0
     max_tracks: int = 5
     max_track_gap_s: float = 2.0
     carrier_smoothing: float = 0.20
@@ -58,6 +60,9 @@ class StreamingConfig:
     emit_interval_s: float = 0.50
     stable_updates: bool = True
     min_update_score: float = 25.0
+    min_live_commit_chars: int = 2
+    live_progress_interval_s: float = 4.0
+    live_progress_min_overlap_chars: int = 3
     final_text_regression_margin: float = 10.0
     max_final_score: float | None = 30.0
     shadow_suppression_hz: float | None = None
@@ -218,6 +223,12 @@ def validate_streaming_config(config: StreamingConfig) -> None:
         raise ValueError("min_peak_snr_db must not be negative")
     if config.min_keying_tone_runs < 0:
         raise ValueError("min_keying_tone_runs must not be negative")
+    if config.min_live_commit_chars < 1:
+        raise ValueError("min_live_commit_chars must be positive")
+    if config.live_progress_interval_s <= 0:
+        raise ValueError("live_progress_interval_s must be positive")
+    if config.live_progress_min_overlap_chars < 1:
+        raise ValueError("live_progress_min_overlap_chars must be positive")
     if config.min_keying_chars < 0:
         raise ValueError("min_keying_chars must not be negative")
     if config.min_keying_known_chars < 0:
@@ -262,6 +273,10 @@ def validate_streaming_config(config: StreamingConfig) -> None:
         raise ValueError("track_match_hz must be positive when set")
     if config.channel_merge_hz is not None and config.channel_merge_hz <= 0:
         raise ValueError("channel_merge_hz must be positive when set")
+    if config.channel_reacquire_hz is not None and config.channel_reacquire_hz <= 0:
+        raise ValueError("channel_reacquire_hz must be positive when set")
+    if config.channel_reacquire_s <= 0:
+        raise ValueError("channel_reacquire_s must be positive")
     if config.max_tracks <= 0:
         raise ValueError("max_tracks must be positive")
     if not 0 <= config.carrier_smoothing <= 1:

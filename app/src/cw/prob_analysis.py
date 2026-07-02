@@ -149,7 +149,7 @@ def analyze_raw_file(
     frame_ms: float = 30.0,
     hop_ms: float = 5.0,
     bandwidth_hz: float = 40.0,
-    threshold_ratios: tuple[float, ...] = (0.20, 0.25, 0.30, 0.35, 0.40, 0.45),
+    threshold_ratios: tuple[float, ...] = (0.12, 0.16, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45),
     adaptive_gap_thresholds: bool = True,
     element_letter_gap_units: float = 2.0,
     default_word_gap_units: float = 7.0,

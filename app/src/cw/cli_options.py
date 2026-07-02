@@ -18,7 +18,7 @@ def _add_streaming_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-history-s", type=float, default=None, help="Hard cap for retained decode frame history; prevents unbounded live memory/CPU growth")
     parser.add_argument("--max-idle-history-s", type=float, default=None, help="Shorter retained-history cap before any channel/session has been recognized")
     parser.add_argument("--min-tone-hz", type=float, default=200.0)
-    parser.add_argument("--max-tone-hz", type=float, default=2000.0)
+    parser.add_argument("--max-tone-hz", type=float, default=3000.0)
     parser.add_argument("--bandwidth-hz", type=float, default=40.0)
     parser.add_argument("--threshold-ratio", type=float, default=0.35)
     parser.add_argument(
@@ -55,12 +55,17 @@ def _add_streaming_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--peak-min-separation-hz", type=float, default=None)
     parser.add_argument("--track-match-hz", type=float, default=None)
     parser.add_argument("--channel-merge-hz", type=float, default=None)
+    parser.add_argument("--channel-reacquire-hz", type=float, default=None, help="Reuse a recent channel within this wider frequency tolerance instead of opening a new one")
+    parser.add_argument("--channel-reacquire-s", type=float, default=15.0, help="Reuse recent/dormant channels for this many seconds after last seen")
     parser.add_argument("--max-tracks", type=int, default=5)
     parser.add_argument("--max-track-gap-s", type=float, default=2.0)
     parser.add_argument("--carrier-smoothing", type=float, default=0.20)
     parser.add_argument("--min-track-hits", type=int, default=2)
     parser.add_argument("--emit-interval-s", type=float, default=0.50)
     parser.add_argument("--min-update-score", type=float, default=25.0)
+    parser.add_argument("--min-live-commit-chars", type=int, default=2, help="Minimum stable non-space characters before emitting a live TEXT_COMMITTED update")
+    parser.add_argument("--live-progress-interval-s", type=float, default=4.0, help="Emit a best-effort active-session progress update after this many seconds without a stable prefix commit")
+    parser.add_argument("--live-progress-min-overlap-chars", type=int, default=3, help="Minimum compact text overlap required when stitching rolling-window live progress updates")
     parser.add_argument("--final-text-regression-margin", type=float, default=10.0, help="Use the last stable live text when final re-decode is this many score points worse")
     parser.add_argument("--max-final-score", type=float, default=30.0)
     parser.add_argument("--disable-final-quality-filter", action="store_true")
@@ -174,6 +179,8 @@ def _streaming_config(args: argparse.Namespace):
         peak_min_separation_hz=args.peak_min_separation_hz,
         track_match_hz=args.track_match_hz,
         channel_merge_hz=args.channel_merge_hz,
+        channel_reacquire_hz=args.channel_reacquire_hz,
+        channel_reacquire_s=args.channel_reacquire_s,
         max_tracks=args.max_tracks,
         max_track_gap_s=args.max_track_gap_s,
         carrier_smoothing=args.carrier_smoothing,
@@ -181,6 +188,9 @@ def _streaming_config(args: argparse.Namespace):
         emit_interval_s=args.emit_interval_s,
         stable_updates=not args.raw_updates,
         min_update_score=args.min_update_score,
+        min_live_commit_chars=args.min_live_commit_chars,
+        live_progress_interval_s=args.live_progress_interval_s,
+        live_progress_min_overlap_chars=args.live_progress_min_overlap_chars,
         final_text_regression_margin=args.final_text_regression_margin,
         max_final_score=None if args.disable_final_quality_filter else args.max_final_score,
         shadow_suppression_hz=args.shadow_suppression_hz,

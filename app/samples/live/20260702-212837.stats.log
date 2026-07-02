@@ -1,0 +1,31 @@
+ Container infra-cw-run-4b1222c0c667 Creating 
+ Container infra-cw-run-4b1222c0c667 Created 
+live duration_s=5.0 frames=995 tracker_frames=493 retained_frames=995 events=12 pruned_frames=0 rms_dbfs=-17.8 peak_dbfs=-8.4
+live duration_s=10.0 frames=1995 tracker_frames=993 retained_frames=1995 events=21 pruned_frames=0 rms_dbfs=-30.1 peak_dbfs=-21.4
+live duration_s=15.0 frames=2995 tracker_frames=1493 retained_frames=2995 events=25 pruned_frames=0 rms_dbfs=-15.9 peak_dbfs=-9.2
+live duration_s=20.0 frames=3995 tracker_frames=1993 retained_frames=3995 events=28 pruned_frames=0 rms_dbfs=-13.8 peak_dbfs=-5.2
+live duration_s=25.0 frames=4995 tracker_frames=2493 retained_frames=2564 events=34 pruned_frames=2431 rms_dbfs=-19.5 peak_dbfs=-11.5
+live duration_s=30.0 frames=5995 tracker_frames=2993 retained_frames=3564 events=39 pruned_frames=2431 rms_dbfs=-24.6 peak_dbfs=-17.6
+live duration_s=35.0 frames=6995 tracker_frames=3493 retained_frames=1593 events=42 pruned_frames=5402 rms_dbfs=-11.9 peak_dbfs=-3.5
+live duration_s=40.0 frames=7995 tracker_frames=3993 retained_frames=2593 events=52 pruned_frames=5402 rms_dbfs=-14.6 peak_dbfs=-4.8
+live duration_s=45.0 frames=8995 tracker_frames=4493 retained_frames=3593 events=54 pruned_frames=5402 rms_dbfs=-13.3 peak_dbfs=-5.3
+live duration_s=50.0 frames=9995 tracker_frames=4993 retained_frames=4593 events=54 pruned_frames=5402 rms_dbfs=-15.1 peak_dbfs=-5.6
+live duration_s=55.0 frames=10995 tracker_frames=5493 retained_frames=537 events=58 pruned_frames=10458 rms_dbfs=-35.4 peak_dbfs=-26.6
+live duration_s=60.0 frames=11995 tracker_frames=5993 retained_frames=1536 events=67 pruned_frames=10459 rms_dbfs=-32.4 peak_dbfs=-26.3
+live duration_s=65.0 frames=12995 tracker_frames=6493 retained_frames=2536 events=70 pruned_frames=10459 rms_dbfs=-17.4 peak_dbfs=-8.0
+live duration_s=70.0 frames=13995 tracker_frames=6993 retained_frames=852 events=81 pruned_frames=13143 rms_dbfs=-14.3 peak_dbfs=-8.0
+live duration_s=75.0 frames=14995 tracker_frames=7493 retained_frames=1311 events=89 pruned_frames=13684 rms_dbfs=-13.9 peak_dbfs=-7.4
+live duration_s=80.0 frames=15995 tracker_frames=7993 retained_frames=598 events=93 pruned_frames=15397 rms_dbfs=-12.8 peak_dbfs=-4.7
+live duration_s=85.0 frames=16995 tracker_frames=8493 retained_frames=917 events=100 pruned_frames=16078 rms_dbfs=-16.6 peak_dbfs=-9.9
+live duration_s=90.0 frames=17995 tracker_frames=8993 retained_frames=1917 events=107 pruned_frames=16078 rms_dbfs=-30.1 peak_dbfs=-21.2
+live duration_s=95.0 frames=18995 tracker_frames=9493 retained_frames=1693 events=113 pruned_frames=17302 rms_dbfs=-10.3 peak_dbfs=-6.7
+live duration_s=100.0 frames=19995 tracker_frames=9993 retained_frames=1581 events=117 pruned_frames=18414 rms_dbfs=-10.1 peak_dbfs=-5.7
+live duration_s=105.0 frames=20995 tracker_frames=10493 retained_frames=2581 events=121 pruned_frames=18414 rms_dbfs=-18.3 peak_dbfs=-9.8
+live duration_s=110.0 frames=21995 tracker_frames=10993 retained_frames=3581 events=121 pruned_frames=18414 rms_dbfs=-12.4 peak_dbfs=-4.9
+live duration_s=115.0 frames=22995 tracker_frames=11493 retained_frames=3207 events=121 pruned_frames=19788 rms_dbfs=-27.0 peak_dbfs=-18.9
+live duration_s=120.0 frames=23995 tracker_frames=11993 retained_frames=4207 events=126 pruned_frames=19788 rms_dbfs=-22.1 peak_dbfs=-13.2
+live duration_s=125.0 frames=24995 tracker_frames=12493 retained_frames=5207 events=132 pruned_frames=19788 rms_dbfs=-14.6 peak_dbfs=-9.4
+live duration_s=130.0 frames=25995 tracker_frames=12993 retained_frames=6207 events=139 pruned_frames=19788 rms_dbfs=-13.2 peak_dbfs=-8.5
+live duration_s=135.0 frames=26995 tracker_frames=13493 retained_frames=7207 events=144 pruned_frames=19788 rms_dbfs=-22.8 peak_dbfs=-14.6
+stream interrupted
+stream interrupted; finalization skipped
