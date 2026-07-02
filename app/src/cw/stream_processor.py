@@ -69,6 +69,8 @@ class StreamProcessor:
         self.active_pruned_frames = 0
         self.finalized_pruned_frames = 0
         self.samples_processed = 0
+        self.last_input_rms = 0.0
+        self.last_input_peak = 0.0
         self._finished_result: StreamSimulationResult | None = None
 
     @property
@@ -88,6 +90,10 @@ class StreamProcessor:
         samples = _to_mono_float(np.asarray(samples))
         if len(samples) == 0:
             return StreamChunkResult(time_s=round(self.processed_duration_s, 3), retained_frames=len(self.frames))
+
+        abs_samples = np.abs(samples)
+        self.last_input_peak = float(np.max(abs_samples)) if len(abs_samples) else 0.0
+        self.last_input_rms = float(np.sqrt(np.mean(np.square(samples)))) if len(samples) else 0.0
 
         start_update_count = len(self.updates)
         start_event_count = len(self.events)
@@ -160,8 +166,9 @@ class StreamProcessor:
             return
 
         self.last_emit_s = frame.start_s
+        live_frames = _live_decode_view_frames(self.frames, self.registry, self.config)
         new_updates = _updates_from_frames(
-            self.frames,
+            live_frames,
             self.registry,
             frame.start_s,
             self.config,
@@ -216,6 +223,35 @@ def process_audio_source(
 
     return processor.finish(final_time_s=source.duration_s)
 
+
+
+def _live_decode_view_frames(
+    frames: list[SpectrumFrame],
+    registry: ChannelRegistry,
+    config: StreamingConfig,
+) -> list[SpectrumFrame]:
+    """Return the rolling decode window used for live updates without mutating history.
+
+    ``prune_finalized_sessions=False`` is useful for debugging final replay, but
+    live updates should not re-decode the full retained history on every tick.
+    This view mirrors the normal pruning cutoff for update-time decoding while
+    keeping the original frame list intact for final inspection.
+    """
+
+    cutoff = registry.prune_cutoff_s()
+    if cutoff is None:
+        return frames
+
+    prune_before_s, reason = cutoff
+    margin_s = config.history_margin_s
+    if reason == "active" and config.active_history_margin_s is not None:
+        margin_s = config.active_history_margin_s
+
+    keep_from_s = max(0.0, prune_before_s - margin_s)
+    first_keep_index = 0
+    while first_keep_index < len(frames) and frames[first_keep_index].start_s < keep_from_s:
+        first_keep_index += 1
+    return frames[first_keep_index:]
 
 def _prune_stream_frames(
     frames: list[SpectrumFrame],

@@ -49,6 +49,7 @@ class StreamingConfig:
     emit_interval_s: float = 0.50
     stable_updates: bool = True
     min_update_score: float = 25.0
+    final_text_regression_margin: float = 10.0
     max_final_score: float | None = 30.0
     shadow_suppression_hz: float | None = None
     shadow_score_margin: float = 15.0
@@ -244,6 +245,8 @@ def validate_streaming_config(config: StreamingConfig) -> None:
         raise ValueError("emit_interval_s must be positive")
     if config.min_update_score <= 0:
         raise ValueError("min_update_score must be positive")
+    if config.final_text_regression_margin < 0:
+        raise ValueError("final_text_regression_margin must not be negative")
     if config.max_final_score is not None and config.max_final_score <= 0:
         raise ValueError("max_final_score must be positive when set")
     if config.shadow_suppression_hz is not None and config.shadow_suppression_hz < 0:

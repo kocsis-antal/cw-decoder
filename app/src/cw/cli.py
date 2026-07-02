@@ -180,6 +180,7 @@ def main() -> None:
     stream_sim_parser.add_argument("--min-track-hits", type=int, default=2)
     stream_sim_parser.add_argument("--emit-interval-s", type=float, default=0.50)
     stream_sim_parser.add_argument("--min-update-score", type=float, default=25.0)
+    stream_sim_parser.add_argument("--final-text-regression-margin", type=float, default=10.0)
     stream_sim_parser.add_argument("--max-final-score", type=float, default=30.0)
     stream_sim_parser.add_argument("--disable-final-quality-filter", action="store_true")
     stream_sim_parser.add_argument("--shadow-suppression-hz", type=float, default=None)
@@ -204,8 +205,57 @@ def main() -> None:
     )
     stream_stdin_parser.add_argument("--channels", type=int, default=1)
     stream_stdin_parser.add_argument("--duration-s", type=float, default=None)
+    stream_stdin_parser.add_argument(
+        "--capture-raw",
+        type=Path,
+        default=None,
+        help="Write the exact raw PCM stdin stream to this file while decoding, for reproducible replay",
+    )
+    stream_stdin_parser.add_argument(
+        "--live-stats-interval-s",
+        type=float,
+        default=0.0,
+        help="Print live input progress to stderr every N seconds of processed audio",
+    )
+    stream_stdin_parser.add_argument(
+        "--no-finalize-on-interrupt",
+        action="store_true",
+        help="Exit immediately on Ctrl+C instead of flushing final stream events",
+    )
     _add_streaming_options(stream_stdin_parser)
     stream_stdin_parser.set_defaults(
+        min_peak_snr_db=14.0,
+        min_keying_tone_runs=3,
+        min_keying_chars=2,
+        min_keying_known_chars=2,
+        min_keying_active_duration_s=0.12,
+        min_keying_duty_cycle=0.03,
+        max_keying_duty_cycle=0.92,
+        min_keying_unit_s=0.03,
+        max_keying_score=120.0,
+        reject_et_only_sessions=True,
+        merge_short_gaps_ms=25.0,
+        drop_short_tones_ms=12.0,
+    )
+
+    stream_raw_file_parser = subparsers.add_parser("stream-raw-file")
+    stream_raw_file_parser.add_argument("raw_path", type=Path)
+    stream_raw_file_parser.add_argument("--sample-rate", type=int, required=True)
+    stream_raw_file_parser.add_argument(
+        "--sample-format",
+        choices=["s16le", "s16be", "s32le", "s32be", "f32le", "f32be", "u8"],
+        default="s16le",
+    )
+    stream_raw_file_parser.add_argument("--channels", type=int, default=1)
+    stream_raw_file_parser.add_argument("--duration-s", type=float, default=None)
+    stream_raw_file_parser.add_argument(
+        "--live-stats-interval-s",
+        type=float,
+        default=0.0,
+        help="Print replay progress to stderr every N seconds of processed audio",
+    )
+    _add_streaming_options(stream_raw_file_parser)
+    stream_raw_file_parser.set_defaults(
         min_peak_snr_db=14.0,
         min_keying_tone_runs=3,
         min_keying_chars=2,
@@ -780,12 +830,36 @@ def main() -> None:
             channels=args.channels,
             block_ms=config.input_block_ms,
             duration_s=args.duration_s,
+            capture_raw_path=args.capture_raw,
         )
         if args.json_events:
-            _print_stream_json_events(source, config)
+            _print_stream_json_events(source, config, args)
             return
 
         result = _run_live_human_stream(source, config, args)
+        if result is None:
+            return
+        _print_stream_summary(result, args)
+    elif args.command == "stream-raw-file":
+        from cw.streaming import RawPcmStreamSource
+
+        config = _streaming_config(args)
+        with args.raw_path.open("rb") as raw_file:
+            source = RawPcmStreamSource(
+                raw_file,
+                sample_rate=args.sample_rate,
+                sample_format=args.sample_format,
+                channels=args.channels,
+                block_ms=config.input_block_ms,
+                duration_s=args.duration_s,
+            )
+            if args.json_events:
+                _print_stream_json_events(source, config, args)
+                return
+
+            result = _run_live_human_stream(source, config, args)
+        if result is None:
+            return
         _print_stream_summary(result, args)
 
 
@@ -829,6 +903,7 @@ def _add_streaming_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--min-track-hits", type=int, default=2)
     parser.add_argument("--emit-interval-s", type=float, default=0.50)
     parser.add_argument("--min-update-score", type=float, default=25.0)
+    parser.add_argument("--final-text-regression-margin", type=float, default=10.0, help="Use the last stable live text when final re-decode is this many score points worse")
     parser.add_argument("--max-final-score", type=float, default=30.0)
     parser.add_argument("--disable-final-quality-filter", action="store_true")
     parser.add_argument("--shadow-suppression-hz", type=float, default=None)
@@ -849,12 +924,14 @@ def _add_streaming_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _print_stream_json_events(source, config) -> None:
+def _print_stream_json_events(source, config, args) -> None:
     from cw.stream_events import stream_event_to_json
     from cw.streaming import StreamProcessor
 
     processor = StreamProcessor(source.sample_rate, config)
     emitted_event_count = 0
+    interrupted = False
+    last_stats_s = 0.0
     try:
         for block in source:
             if block.sample_rate != source.sample_rate:
@@ -863,11 +940,21 @@ def _print_stream_json_events(source, config) -> None:
             for event in chunk.events:
                 print(stream_event_to_json(event), flush=True)
                 emitted_event_count += 1
+            last_stats_s = _maybe_print_live_stats(args, processor, emitted_event_count, last_stats_s)
     except KeyboardInterrupt:
-        print("stream interrupted; finalizing", file=sys.stderr)
+        interrupted = True
+        print("stream interrupted", file=sys.stderr)
+
+    if interrupted and getattr(args, "no_finalize_on_interrupt", False):
+        print("stream interrupted; finalization skipped", file=sys.stderr)
+        return
 
     final_time_s = source.duration_s if source.duration_s is not None else processor.processed_duration_s
-    result = processor.finish(final_time_s=final_time_s)
+    try:
+        result = processor.finish(final_time_s=final_time_s)
+    except KeyboardInterrupt:
+        print("stream finalization interrupted; exiting", file=sys.stderr)
+        return
     for event in result.events[emitted_event_count:]:
         print(stream_event_to_json(event), flush=True)
 
@@ -876,6 +963,9 @@ def _run_live_human_stream(source, config, args):
     from cw.streaming import StreamProcessor
 
     processor = StreamProcessor(source.sample_rate, config)
+    interrupted = False
+    last_stats_s = 0.0
+    emitted_event_count = 0
     try:
         for block in source:
             if block.sample_rate != source.sample_rate:
@@ -886,12 +976,58 @@ def _run_live_human_stream(source, config, args):
             if args.events:
                 for event in chunk.events:
                     print(_format_event_line(event), flush=True)
+                    emitted_event_count += 1
+            else:
+                emitted_event_count += len(chunk.events)
+            last_stats_s = _maybe_print_live_stats(args, processor, emitted_event_count, last_stats_s)
     except KeyboardInterrupt:
-        print("stream interrupted; finalizing", file=sys.stderr)
+        interrupted = True
+        print("stream interrupted", file=sys.stderr)
+
+    if interrupted and getattr(args, "no_finalize_on_interrupt", False):
+        print("stream interrupted; finalization skipped", file=sys.stderr)
+        return None
 
     final_time_s = source.duration_s if source.duration_s is not None else processor.processed_duration_s
-    return processor.finish(final_time_s=final_time_s)
+    try:
+        return processor.finish(final_time_s=final_time_s)
+    except KeyboardInterrupt:
+        print("stream finalization interrupted; exiting", file=sys.stderr)
+        return None
 
+
+def _maybe_print_live_stats(args, processor, emitted_event_count: int, last_stats_s: float) -> float:
+    interval_s = float(getattr(args, "live_stats_interval_s", 0.0) or 0.0)
+    if interval_s <= 0:
+        return last_stats_s
+
+    now_s = processor.processed_duration_s
+    if now_s - last_stats_s < interval_s:
+        return last_stats_s
+
+    print(
+        "live "
+        f"duration_s={now_s:.1f} "
+        f"frames={processor.frames_processed} "
+        f"tracker_frames={processor.tracker_frames_processed} "
+        f"retained_frames={processor.retained_frames} "
+        f"events={emitted_event_count} "
+        f"pruned_frames={processor.pruned_frames} "
+        f"rms_dbfs={_dbfs(processor.last_input_rms):.1f} "
+        f"peak_dbfs={_dbfs(processor.last_input_peak):.1f}",
+        file=sys.stderr,
+        flush=True,
+    )
+    return now_s
+
+
+
+def _dbfs(value: float) -> float:
+    import math
+
+    if value <= 0:
+        return -120.0
+    return 20.0 * math.log10(min(value, 1.0))
 
 def _print_stream_summary(result, args) -> None:
     print(f"duration_s={result.duration_s:.3f}")
@@ -1058,6 +1194,7 @@ def _streaming_config(args: argparse.Namespace):
         emit_interval_s=args.emit_interval_s,
         stable_updates=not args.raw_updates,
         min_update_score=args.min_update_score,
+        final_text_regression_margin=args.final_text_regression_margin,
         max_final_score=None if args.disable_final_quality_filter else args.max_final_score,
         shadow_suppression_hz=args.shadow_suppression_hz,
         shadow_score_margin=args.shadow_score_margin,

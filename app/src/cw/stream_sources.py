@@ -190,6 +190,7 @@ class RawPcmStreamSource:
         channels: int = 1,
         block_ms: float = 10.0,
         duration_s: float | None = None,
+        capture_raw_path: Path | None = None,
     ) -> None:
         if sample_rate <= 0:
             raise ValueError("sample_rate must be positive")
@@ -206,6 +207,7 @@ class RawPcmStreamSource:
         self.channels = int(channels)
         self.block_ms = float(block_ms)
         self.duration_s = duration_s
+        self.capture_raw_path = Path(capture_raw_path) if capture_raw_path is not None else None
         self.block_size_frames = max(1, round(self.sample_rate * self.block_ms / 1000))
         self.sample_width_bytes = pcm_sample_width_bytes(self.sample_format)
         self.frame_width_bytes = self.sample_width_bytes * self.channels
@@ -216,37 +218,48 @@ class RawPcmStreamSource:
         pending = b""
         index = 0
         frames_read = 0
-        while self.max_frames is None or frames_read < self.max_frames:
-            wanted = self.block_size_bytes
-            if self.max_frames is not None:
-                remaining_frames = self.max_frames - frames_read
-                wanted = min(wanted, remaining_frames * self.frame_width_bytes)
-            raw = self.stream.read(wanted)
-            if not raw:
-                break
+        capture_file = None
+        try:
+            if self.capture_raw_path is not None:
+                self.capture_raw_path.parent.mkdir(parents=True, exist_ok=True)
+                capture_file = self.capture_raw_path.open("wb")
 
-            pending += raw
-            usable_bytes = (len(pending) // self.frame_width_bytes) * self.frame_width_bytes
-            if usable_bytes <= 0:
-                continue
+            while self.max_frames is None or frames_read < self.max_frames:
+                wanted = self.block_size_bytes
+                if self.max_frames is not None:
+                    remaining_frames = self.max_frames - frames_read
+                    wanted = min(wanted, remaining_frames * self.frame_width_bytes)
+                raw = self.stream.read(wanted)
+                if not raw:
+                    break
+                if capture_file is not None:
+                    capture_file.write(raw)
 
-            block_raw = pending[:usable_bytes]
-            pending = pending[usable_bytes:]
-            samples = decode_raw_pcm(block_raw, self.sample_format, self.channels)
-            if self.max_frames is not None:
-                samples = samples[: self.max_frames - frames_read]
-            if len(samples) == 0:
-                break
+                pending += raw
+                usable_bytes = (len(pending) // self.frame_width_bytes) * self.frame_width_bytes
+                if usable_bytes <= 0:
+                    continue
 
-            yield AudioBlock(
-                samples=samples,
-                sample_rate=self.sample_rate,
-                start_s=frames_read / self.sample_rate,
-                duration_s=len(samples) / self.sample_rate,
-                index=index,
-            )
-            frames_read += len(samples)
-            index += 1
+                block_raw = pending[:usable_bytes]
+                pending = pending[usable_bytes:]
+                samples = decode_raw_pcm(block_raw, self.sample_format, self.channels)
+                if self.max_frames is not None:
+                    samples = samples[: self.max_frames - frames_read]
+                if len(samples) == 0:
+                    break
+
+                yield AudioBlock(
+                    samples=samples,
+                    sample_rate=self.sample_rate,
+                    start_s=frames_read / self.sample_rate,
+                    duration_s=len(samples) / self.sample_rate,
+                    index=index,
+                )
+                frames_read += len(samples)
+                index += 1
+        finally:
+            if capture_file is not None:
+                capture_file.close()
 
 
 def _pcm_format(sample_format: str) -> RawPcmFormat:

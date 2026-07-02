@@ -120,3 +120,22 @@ def test_raw_pcm_stream_source_reads_stdin_like_binary_blocks() -> None:
 def test_decode_raw_pcm_rejects_partial_frames() -> None:
     with pytest.raises(ValueError, match="partial sample frame"):
         decode_raw_pcm(b"\x00", "s16le", channels=1)
+
+
+def test_raw_pcm_stream_source_can_capture_exact_bytes(tmp_path: Path) -> None:
+    samples = np.linspace(-0.25, 0.25, 30, dtype=np.float32)
+    raw = _float_to_s16le(samples)
+    capture_path = tmp_path / "capture" / "sample.s16le"
+    source = RawPcmStreamSource(
+        io.BytesIO(raw),
+        sample_rate=1000,
+        sample_format="s16le",
+        channels=1,
+        block_ms=10,
+        capture_raw_path=capture_path,
+    )
+
+    blocks = list(source)
+
+    assert sum(len(block.samples) for block in blocks) == len(samples)
+    assert capture_path.read_bytes() == raw

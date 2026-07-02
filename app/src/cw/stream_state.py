@@ -4,6 +4,7 @@ from dataclasses import dataclass, field, replace
 
 from cw.decoder import DecodeResult
 from cw.morse_table import decode_tokens
+from cw.quality import QualityScore
 from cw.stream_models import StreamEvent, StreamingConfig, StreamSessionResult, channel_match_hz
 
 
@@ -23,6 +24,7 @@ class SessionState:
     start_event_emitted: bool = False
     last_candidate_text: str = ""
     committed_text: str = ""
+    committed_quality: QualityScore | None = None
     committed_until_s: float | None = None
     pruned_text: str = ""
     last_tail_text: str = ""
@@ -40,6 +42,7 @@ class SessionState:
     def reset_live_text(self) -> None:
         self.last_candidate_text = ""
         self.committed_text = ""
+        self.committed_quality = None
         self.committed_until_s = None
         self.pruned_text = ""
         self.last_tail_text = ""
@@ -72,6 +75,7 @@ class SessionState:
         if text_to_emit is None:
             return None
 
+        self.committed_quality = session.quality
         safe_prune_text = _safe_active_prune_prefix(self.committed_text)
         if safe_prune_text.startswith(self.pruned_text) and len(safe_prune_text) > len(self.pruned_text):
             tail_prefix_chars = _tail_prefix_chars_for_merged_prefix(
@@ -92,6 +96,32 @@ class SessionState:
                         self.required_frame_start_s = self.committed_until_s
 
         return text_to_emit
+
+    def final_session_candidate(self, session: StreamSessionResult, config: StreamingConfig) -> StreamSessionResult:
+        """Avoid replacing already-stable live text with a worse final re-decode.
+
+        Live processing repeatedly decodes a rolling history window.  When a
+        session closes, the final decode can include a bit more trailing noise
+        and occasionally scores much worse than the stable text that was already
+        emitted while the signal was active.  In that case keep the last stable
+        text instead of letting the final event regress.
+        """
+
+        committed_text = self.committed_text.strip()
+        final_text = session.decoded.text.strip()
+        if not committed_text or not final_text:
+            return session
+        if _texts_are_compatible(committed_text, final_text):
+            return session
+        if self.committed_quality is None:
+            return session
+        if session.quality.score <= self.committed_quality.score + config.final_text_regression_margin:
+            return session
+        return replace(
+            session,
+            decoded=replace(session.decoded, text=committed_text),
+            quality=self.committed_quality,
+        )
 
     def text_to_commit(self, current_text: str, score: float, config: StreamingConfig) -> str | None:
         if not config.stable_updates:
@@ -136,6 +166,7 @@ class ChannelState:
     current_session: SessionState = field(default_factory=lambda: SessionState(1))
     finalized_session_ids: set[int] = field(default_factory=set)
     finalized_sessions: list[StreamSessionResult] = field(default_factory=list)
+    suppressed_until_s: float | None = None
 
     @property
     def session_id(self) -> int:
@@ -147,6 +178,15 @@ class ChannelState:
         # earliest frame that the active session still needs, not necessarily the
         # original first tone of the session.
         return self.current_session.required_frame_start_s
+
+    @property
+    def finalized_until_s(self) -> float | None:
+        times = [session.final_time_s for session in self.finalized_sessions]
+        if self.suppressed_until_s is not None:
+            times.append(self.suppressed_until_s)
+        if not times:
+            return None
+        return max(times)
 
     def start_next_session(self) -> None:
         self.current_session = SessionState(self.current_session.session_id + 1)
@@ -212,6 +252,9 @@ class ChannelRegistry:
         channel.current_session.required_frame_start_s = None
 
         for decoded_session in sessions:
+            if self._is_stale_decoded_session(channel, decoded_session):
+                continue
+
             existing = self._matching_finalized_session(channel, decoded_session)
             if existing is not None:
                 if channel.session_id <= existing.session_id:
@@ -284,6 +327,24 @@ class ChannelRegistry:
         state.start_event_emitted = True
         state.reset_live_text()
 
+    def _is_stale_decoded_session(self, channel: ChannelState, session: StreamSessionResult) -> bool:
+        """Ignore already-finalized audio that is still present in the rolling frame buffer.
+
+        Live decoding repeatedly re-evaluates a retained time window.  Real audio
+        can make an old closed segment decode with slightly different text after
+        smoothing/tracker drift, so exact text matching is not enough to recognize
+        it as already handled.  Once a channel has finalized up to time T, any
+        newly decoded segment that ends before T is stale history and must not
+        create a fresh session id/event.
+        """
+
+        finalized_until_s = channel.finalized_until_s
+        if finalized_until_s is None:
+            return False
+
+        tolerance_s = max(self.config.hop_ms / 1000 * 6, 0.05)
+        return session.last_seen_s <= finalized_until_s + tolerance_s
+
     def _matching_finalized_session(
         self, channel: ChannelState, session: StreamSessionResult
     ) -> StreamSessionResult | None:
@@ -300,23 +361,44 @@ class ChannelRegistry:
     def _finalize_session(self, channel: ChannelState, session: StreamSessionResult) -> None:
         if session.session_id in channel.finalized_session_ids:
             return
-        self._pending_events.append(
-            StreamEvent(
-                time_s=round(session.final_time_s, 3),
-                kind="SESSION_FINAL",
-                channel_id=channel.track_id,
-                session_id=session.session_id,
-                carrier_hz=round(channel.carrier_hz, 3),
-                text=session.decoded.text,
-                score=session.quality.score,
-                reason=session.final_reason,
-            )
-        )
+        session = channel.current_session.final_session_candidate(session, self.config)
         channel.finalized_session_ids.add(session.session_id)
-        channel.finalized_sessions.append(session)
-        channel.finalized_sessions.sort(key=lambda item: item.session_id)
+        if self._should_publish_final_session(session):
+            self._pending_events.append(
+                StreamEvent(
+                    time_s=round(session.final_time_s, 3),
+                    kind="SESSION_FINAL",
+                    channel_id=channel.track_id,
+                    session_id=session.session_id,
+                    carrier_hz=round(channel.carrier_hz, 3),
+                    text=session.decoded.text,
+                    score=session.quality.score,
+                    reason=session.final_reason,
+                )
+            )
+            channel.finalized_sessions.append(session)
+            channel.finalized_sessions.sort(key=lambda item: item.session_id)
+        else:
+            self._pending_events.append(
+                StreamEvent(
+                    time_s=round(session.final_time_s, 3),
+                    kind="SESSION_FINAL",
+                    channel_id=channel.track_id,
+                    session_id=session.session_id,
+                    carrier_hz=round(channel.carrier_hz, 3),
+                    text="",
+                    score=session.quality.score,
+                    reason="quality_suppressed",
+                )
+            )
+            channel.suppressed_until_s = max(channel.suppressed_until_s or 0.0, session.final_time_s)
         if channel.session_id <= session.session_id:
             channel.start_next_session()
+
+    def _should_publish_final_session(self, session: StreamSessionResult) -> bool:
+        if self.config.max_final_score is None:
+            return True
+        return session.quality.score <= self.config.max_final_score
 
 
 def _common_text_prefix(left: str, right: str) -> str:
@@ -326,6 +408,14 @@ def _common_text_prefix(left: str, right: str) -> str:
         index += 1
     return left[:index]
 
+
+
+def _texts_are_compatible(left: str, right: str) -> bool:
+    left = left.strip()
+    right = right.strip()
+    if not left or not right:
+        return True
+    return left.startswith(right) or right.startswith(left)
 
 def _merge_committed_prefix_and_tail(prefix: str, tail: str) -> tuple[str, int]:
     if not prefix:

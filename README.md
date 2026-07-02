@@ -310,10 +310,13 @@ into the same `StreamProcessor`. This is the first live-input path: the decoder
 does not care whether the bytes come from a real microphone, a virtual audio
 cable, a browser WebSDR monitor, or `ffmpeg`.
 
-A deterministic replay smoke test can be made from any WAV with `ffmpeg`:
+A deterministic replay smoke test can be made from any WAV with `ffmpeg`.
+When host-side `ffmpeg` is started from the repository root, generated samples
+are under `app/samples/...`; inside the container the same file is
+`samples/...`:
 
 ```bash
-ffmpeg -hide_banner -loglevel error -i samples/generated/qso.wav -f s16le -ac 1 -ar 8000 - \
+ffmpeg -hide_banner -loglevel error -i app/samples/generated/qso.wav -f s16le -ac 1 -ar 8000 - \
 | docker compose -f infra/compose.yml run --rm -T cw python -m cw.cli stream-stdin \
     --sample-rate 8000 \
     --sample-format s16le \
@@ -321,8 +324,51 @@ ffmpeg -hide_banner -loglevel error -i samples/generated/qso.wav -f s16le -ac 1 
     --prune-committed-active-sessions
 ```
 
-On Linux/PulseAudio/PipeWire, a browser SDR can be captured through a virtual
-sink and its monitor source:
+On Linux/PulseAudio/PipeWire, install the small PulseAudio-compatible command
+line tools if `pactl`/`parec` are missing:
+
+```bash
+sudo apt install --no-install-recommends pulseaudio-utils pavucontrol
+```
+
+The quickest Linux test is to capture the default output monitor. This listens
+to whatever currently goes to the default speakers/headphones:
+
+```bash
+pactl get-default-sink
+pactl list short sources | grep monitor
+
+ffmpeg -hide_banner -loglevel error \
+  -f pulse -i "$(pactl get-default-sink).monitor" \
+  -f s16le -ac 1 -ar 8000 - \
+| docker compose -f infra/compose.yml run --rm -T cw python -m cw.cli stream-stdin \
+    --sample-rate 8000 \
+    --sample-format s16le \
+    --json-events \
+    --prune-committed-active-sessions \
+    --live-stats-interval-s 5
+```
+
+`--json-events` prints only real decoder events. If the squelch/keying gate is
+holding everything back, stdout may stay quiet even though audio is being read;
+`--live-stats-interval-s` prints progress to stderr without polluting JSONL. It
+also prints `rms_dbfs` and `peak_dbfs`, which are useful for spotting muted or
+very low-level monitor audio. A very quiet stream, for example below roughly
+`-45 dBFS`, is worth turning up before tuning decoder thresholds.
+
+For general live SDR work, avoid tuning the decoder to one hard-coded audio
+pitch range unless the capture is intentionally about one fixed station. Moving
+the receiver shifts where stations land in the audio passband, so frequency
+limits such as `--min-tone-hz` / `--max-tone-hz` are best treated as temporary
+debug tools, not normal live defaults. For clean but misread CW, try a mild unit
+hypothesis search before changing the core decoder:
+
+```bash
+--unit-candidate-spread 0.35 --unit-candidate-steps 7 --punctuation-penalty 4
+```
+
+For a cleaner browser/WebSDR setup, create a virtual sink and route only the SDR
+tab to it in `pavucontrol` or the system mixer:
 
 ```bash
 pactl load-module module-null-sink sink_name=cw_sdr sink_properties=device.description=CW_SDR
@@ -332,8 +378,33 @@ parec -d cw_sdr.monitor --format=s16le --rate=8000 --channels=1 \
     --sample-rate 8000 \
     --sample-format s16le \
     --json-events \
-    --prune-committed-active-sessions
+    --prune-committed-active-sessions \
+    --live-stats-interval-s 5
 ```
+
+To hear the virtual sink while decoding it, loop it back to the real default
+output:
+
+```bash
+pactl load-module module-loopback source=cw_sdr.monitor sink=@DEFAULT_SINK@ latency_msec=50
+```
+
+For troubleshooting, first record a short WAV and decode it as a normal replay.
+This separates audio routing problems from decoder problems:
+
+```bash
+ffmpeg -hide_banner -loglevel info \
+  -f pulse -i "$(pactl get-default-sink).monitor" \
+  -t 10 -ac 1 -ar 8000 \
+  app/samples/generated/linux_monitor_test.wav
+
+docker compose -f infra/compose.yml run --rm cw \
+  python -m cw.cli stream-sim samples/generated/linux_monitor_test.wav --events
+```
+
+If the recording is silent or contains the wrong application, the browser is
+probably playing to a different sink than the one being monitored. Check
+`pavucontrol`'s Playback tab while the WebSDR is playing.
 
 Supported raw sample formats are `s16le`, `s16be`, `s32le`, `s32be`, `f32le`,
 `f32be`, and `u8`. Use `--channels 2` for stereo input; the source averages
@@ -369,12 +440,80 @@ search is also available through `--unit-candidate-spread`,
 `--unit-candidate-steps`, and `--punctuation-penalty`, but it is not enabled by
 default yet because it still needs more real-signal tuning.
 
+Live final events now also have a small anti-regression guard. If the decoder
+had already emitted stable live text for a session and the closing re-decode is
+more than `--final-text-regression-margin` score points worse, the final event
+keeps the stable text instead of replacing it with trailing-noise garbage. Live
+`SESSION_FINAL` events also respect `--max-final-score`; low-quality closed
+sessions are used internally for stale-history suppression and are closed with
+`reason=quality_suppressed` and empty text, so lifecycle consumers do not keep
+an open session while the noisy text stays out of the transcript.
+
 For very weak signals, lower the spectral gate, for example
 `--min-peak-snr-db 10`; for a noisy empty band, raise it, for example
 `--min-peak-snr-db 18`. If the first characters of a real station are being held
 back too long, lower the keying gate, for example `--min-keying-chars 1` or
 `--min-keying-tone-runs 2`. `stream-sim` keeps the older permissive lab defaults
 unless you pass these options explicitly.
+
+Stopping live input with Ctrl+C normally flushes final sessions. On a noisy live
+source that final flush can be slow because there may be many retained
+candidates. Use `--no-finalize-on-interrupt` for quick live experiments where
+you want Ctrl+C to exit immediately:
+
+```bash
+... | docker compose -f infra/compose.yml run --rm -T cw python -m cw.cli stream-stdin \
+    --sample-rate 8000 \
+    --sample-format s16le \
+    --json-events \
+    --no-finalize-on-interrupt
+```
+
+### Reproducible live captures
+
+Live radio is not repeatable, so decoder changes should be driven by captured
+raw audio samples rather than by a one-off console log. `stream-stdin` can write
+the exact PCM byte stream it receives while it is decoding it:
+
+```bash
+mkdir -p app/samples/live
+ts=$(date +%Y%m%d-%H%M%S)
+
+ffmpeg -hide_banner -loglevel error \
+  -f pulse -i "$(pactl get-default-sink).monitor" \
+  -f s16le -ac 1 -ar 8000 - \
+| docker compose -f infra/compose.yml run --rm -T cw \
+    python -m cw.cli stream-stdin \
+      --sample-rate 8000 \
+      --sample-format s16le \
+      --json-events \
+      --prune-committed-active-sessions \
+      --live-stats-interval-s 5 \
+      --no-finalize-on-interrupt \
+      --capture-raw "samples/live/${ts}.s16le" \
+  2> "app/samples/live/${ts}.stats.log" \
+| tee "app/samples/live/${ts}.events.jsonl"
+```
+
+The `--capture-raw` path is inside the container, so use `samples/live/...`. The
+events and stats redirections are host-side, so use `app/samples/live/...` from
+the repository root. The captured file can be replayed without any live audio
+routing:
+
+```bash
+docker compose -f infra/compose.yml run --rm cw \
+  python -m cw.cli stream-raw-file samples/live/${ts}.s16le \
+    --sample-rate 8000 \
+    --sample-format s16le \
+    --json-events \
+    --prune-committed-active-sessions
+```
+
+For multi-station recordings, avoid using a narrow `--min-tone-hz` /
+`--max-tone-hz` range unless the sample is intentionally about one fixed audio
+pitch. Tuning the receiver changes where stations land in the audio passband.
+Likewise, `--max-tracks 3` is a debug cap; it can hide weaker keyed stations
+when a few strong carriers or audio artefacts are present.
 
 On Windows, run raw PCM pipes from `cmd.exe`, not PowerShell. PowerShell can
 corrupt binary stdout/stderr pipelines. When host-side `ffmpeg` reads generated
@@ -383,8 +522,11 @@ example `app\samples\generated\qso.wav`; inside the container the same file is
 `/app/samples/generated/qso.wav`. A VB-CABLE/WebSDR command looks like this:
 
 ```cmd
-ffmpeg -hide_banner -loglevel error -f dshow -i audio="CABLE Output (VB-Audio Virtual Cable)" -f s16le -ac 1 -ar 8000 - | docker compose -f infra\compose.yml run --rm -T cw python -m cw.cli stream-stdin --sample-rate 8000 --sample-format s16le --json-events --prune-committed-active-sessions
+ffmpeg -hide_banner -loglevel error -f dshow -i audio="CABLE Output (VB-Audio Virtual Cable)" -f s16le -ac 1 -ar 8000 - | docker compose -f infra\compose.yml run --rm -T cw python -m cw.cli stream-stdin --sample-rate 8000 --sample-format s16le --json-events --prune-committed-active-sessions --live-stats-interval-s 5
 ```
+
+PowerShell can still be used as a launcher by wrapping the whole binary pipe in
+`cmd /d /c "..."`, but the pipe itself should stay inside `cmd.exe`.
 
 
 ### Streaming core layout
@@ -397,7 +539,7 @@ stream_stft.py    incremental overlapping STFT over a continuous sample stream
 stream_decode.py  carrier/session decoding helpers from retained FFT frames
 stream_tracker.py frame-by-frame spectral peak tracking, SNR squelch, carrier tracks
 stream_keying.py CW-like keying gate before public channel/session events
-stream_state.py   mutable ChannelState/SessionState lifecycle, commit bookkeeping, active prune anchors
+stream_state.py   mutable ChannelState/SessionState lifecycle, commit bookkeeping, active prune anchors, stale-history suppression
 stream_events.py  stable JSON/JSONL serialization for stream events
 stream_sources.py block-based WAV/array/raw-PCM audio sources for replay and live input
 stream_processor.py stateful push/finish live processor and pruning orchestration
