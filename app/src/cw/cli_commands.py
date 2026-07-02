@@ -437,6 +437,41 @@ def run_cli_command(args) -> None:
                 print(f"expectation_failure={failure}")
             if not expectation.passed:
                 sys.exit(1)
+    elif args.command == "analyze-raw":
+        from cw.prob_analysis import analyze_raw_file, format_human_report, parse_float_csv, report_to_json
+
+        report = analyze_raw_file(
+            args.raw_path,
+            sample_rate=args.sample_rate,
+            sample_format=args.sample_format,
+            channels=args.channels,
+            start_s=args.start_s,
+            duration_s=args.duration_s,
+            carriers=tuple(args.carrier or ()),
+            detect_carriers=args.detect_carriers,
+            min_tone_hz=args.min_tone_hz,
+            max_tone_hz=args.max_tone_hz,
+            min_separation_hz=args.min_separation_hz,
+            peak_relative_threshold=args.peak_relative_threshold,
+            frame_ms=args.frame_ms,
+            hop_ms=args.hop_ms,
+            bandwidth_hz=args.bandwidth_hz,
+            threshold_ratios=parse_float_csv(args.threshold_ratios),
+            adaptive_gap_thresholds=args.adaptive_gap_thresholds,
+            element_letter_gap_units=args.element_letter_gap_units,
+            default_word_gap_units=args.default_word_gap_units,
+            gap_cluster_min_ratio=args.gap_cluster_min_ratio,
+            gap_cluster_min_delta_units=args.gap_cluster_min_delta_units,
+            gap_cluster_min_lower_count=args.gap_cluster_min_lower_count,
+            merge_short_gaps_ms=args.merge_short_gaps_ms,
+            drop_short_tones_ms=args.drop_short_tones_ms,
+            unit_candidate_spread=args.unit_candidate_spread,
+            unit_candidate_steps=args.unit_candidate_steps,
+            punctuation_penalty=args.punctuation_penalty,
+            preview_runs=args.preview_runs,
+        )
+        print(report_to_json(report) if args.json else format_human_report(report))
+
     elif args.command == "stream-sim":
         from cw.streaming import StreamProcessor, WavFileSource, simulate_stream_from_wav
 
