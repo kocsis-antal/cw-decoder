@@ -30,7 +30,7 @@ def score_decode_result(result: DecodeResult) -> QualityScore:
     unit_cv = _unit_cv(dots)
 
     score = (
-        unknown_count * 300
+        _unknown_penalty(unknown_count, token_count)
         + _invalid_token_penalty(result.tokens)
         + _too_few_tokens_penalty(token_count)
         + tone_ratio_error * 120
@@ -48,6 +48,19 @@ def score_decode_result(result: DecodeResult) -> QualityScore:
         gap_min_error=gap_min_error,
         unit_cv=unit_cv,
     )
+
+
+def _unknown_penalty(unknown_count: int, token_count: int) -> float:
+    """Penalize unknowns by density, not by raw count.
+
+    A single undecodable callsign character in a long otherwise-plausible CW
+    sentence should not suppress the whole final session.  Short snippets made
+    mostly of ``?`` still score badly because their unknown density is high.
+    """
+
+    if unknown_count <= 0:
+        return 0.0
+    return 240.0 * unknown_count / max(token_count, 1)
 
 
 def _tone_ratio_error(dots, dashes) -> float:
@@ -80,7 +93,7 @@ def _unit_cv(dots) -> float:
         return 0.0
 
     durations = [run.duration_s for run in dots]
-    mean = sum(durations) / len(durations)
+    mean = sum(run.duration_s for run in dots) / len(dots)
     if mean <= 0:
         return 10.0
 

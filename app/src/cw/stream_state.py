@@ -49,8 +49,8 @@ class SessionState:
         self.last_tail_overlap_chars = 0
         self.last_tail_cutoff_s = None
 
-    def with_committed_prefix(self, session: StreamSessionResult) -> StreamSessionResult:
-        tail_cutoff_s = self.committed_until_s
+    def with_committed_prefix(self, session: StreamSessionResult, config: StreamingConfig) -> StreamSessionResult:
+        tail_cutoff_s = self.committed_until_s if config.prune_committed_active_sessions else None
         tail_text = _decoded_text_after_s(session.decoded, tail_cutoff_s) if tail_cutoff_s is not None else session.decoded.text
         if tail_cutoff_s is None:
             merged_text = session.decoded.text
@@ -255,6 +255,10 @@ class ChannelRegistry:
             if self._is_stale_decoded_session(channel, decoded_session):
                 continue
 
+            decoded_session = self._trim_session_to_live_tail(channel, decoded_session)
+            if decoded_session is None:
+                continue
+
             existing = self._matching_finalized_session(channel, decoded_session)
             if existing is not None:
                 if channel.session_id <= existing.session_id:
@@ -264,7 +268,7 @@ class ChannelRegistry:
             session = self._with_current_session_id(channel, decoded_session)
             self._ensure_session_started(channel, session)
             channel.current_session.mark_observed(session, self.config)
-            session = channel.current_session.with_committed_prefix(session)
+            session = channel.current_session.with_committed_prefix(session, self.config)
 
             if session.final_reason == "silence_gap":
                 self._finalize_session(channel, session)
@@ -328,22 +332,67 @@ class ChannelRegistry:
         state.reset_live_text()
 
     def _is_stale_decoded_session(self, channel: ChannelState, session: StreamSessionResult) -> bool:
-        """Ignore already-finalized audio that is still present in the rolling frame buffer.
+        """Ignore old audio that is still present in the rolling live window.
 
         Live decoding repeatedly re-evaluates a retained time window.  Real audio
         can make an old closed segment decode with slightly different text after
         smoothing/tracker drift, so exact text matching is not enough to recognize
-        it as already handled.  Once a channel has finalized up to time T, any
-        newly decoded segment that ends before T is stale history and must not
-        create a fresh session id/event.
+        it as already handled.  Once a channel has finalized or suppressed up to
+        time T, any newly decoded segment that ends before T is stale history.
+
+        There is a second live-specific stale case: while the current session is
+        already known to start later, a multi-threshold re-decode can still
+        surface an older retained segment that was not publishable before.  That
+        segment must not receive the current session id, otherwise the event log
+        may show a SESSION_FINAL timestamp that predates its SESSION_STARTED.
+        """
+
+        tolerance_s = max(self.config.hop_ms / 1000 * 6, 0.05)
+
+        finalized_until_s = channel.finalized_until_s
+        if finalized_until_s is not None and session.last_seen_s <= finalized_until_s + tolerance_s:
+            return True
+
+        active_first_seen_s = channel.current_session.first_seen_s
+        if active_first_seen_s is not None and session.last_seen_s < active_first_seen_s - tolerance_s:
+            return True
+
+        return False
+
+    def _trim_session_to_live_tail(
+        self, channel: ChannelState, session: StreamSessionResult
+    ) -> StreamSessionResult | None:
+        """Drop the already-finalized prefix from a retained-window decode.
+
+        Multi-threshold decoding may later discover a lower-threshold candidate
+        that overlaps a short session already finalized at a higher threshold.
+        The overlapping prefix must not be published again under a new session
+        id.  Keep only the text whose token end time is after the finalized
+        cutoff, so late-discovered continuation can still be used without
+        time-traveling SESSION_STARTED events.
         """
 
         finalized_until_s = channel.finalized_until_s
         if finalized_until_s is None:
-            return False
+            return session
 
         tolerance_s = max(self.config.hop_ms / 1000 * 6, 0.05)
-        return session.last_seen_s <= finalized_until_s + tolerance_s
+        if session.first_seen_s >= finalized_until_s - tolerance_s:
+            return session
+        if session.last_seen_s <= finalized_until_s + tolerance_s:
+            return None
+
+        tail_text = _decoded_text_after_s(session.decoded, finalized_until_s)
+        if not tail_text.strip():
+            return None
+
+        first_tail_tone_s = _first_tone_start_after_s(session.decoded.runs, finalized_until_s)
+        first_seen_s = first_tail_tone_s if first_tail_tone_s is not None else finalized_until_s
+        return replace(
+            session,
+            first_seen_s=round(max(first_seen_s, finalized_until_s), 3),
+            decoded=replace(session.decoded, text=tail_text),
+        )
 
     def _matching_finalized_session(
         self, channel: ChannelState, session: StreamSessionResult
@@ -415,7 +464,13 @@ def _texts_are_compatible(left: str, right: str) -> bool:
     right = right.strip()
     if not left or not right:
         return True
+    if _without_spaces(left) == _without_spaces(right):
+        return True
     return left.startswith(right) or right.startswith(left)
+
+
+def _without_spaces(text: str) -> str:
+    return "".join(text.split())
 
 def _merge_committed_prefix_and_tail(prefix: str, tail: str) -> tuple[str, int]:
     if not prefix:
@@ -450,6 +505,13 @@ def _tail_prefix_chars_for_merged_prefix(prefix_len: int, base_len: int, overlap
 def _decoded_text_after_s(decoded: DecodeResult, after_s: float | None) -> str:
     tokens = [token for token, end_s in _decoded_tokens_with_end_times(decoded) if after_s is None or end_s > after_s]
     return decode_tokens(tokens)
+
+
+def _first_tone_start_after_s(runs, after_s: float) -> float | None:
+    for run in runs:
+        if run.kind == "tone" and run.start_s + run.duration_s > after_s:
+            return max(run.start_s, after_s)
+    return None
 
 
 def _decoded_tail_prefix_end_s(decoded: DecodeResult, char_count: int, after_s: float | None = None) -> float | None:

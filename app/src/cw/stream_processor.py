@@ -136,7 +136,7 @@ class StreamProcessor:
             return self._finished_result
 
         duration_s = self.processed_duration_s if final_time_s is None else final_time_s
-        tracks = _final_tracks_from_frames(
+        all_tracks = _final_tracks_from_frames(
             self.frames,
             self.registry,
             self.config,
@@ -144,7 +144,8 @@ class StreamProcessor:
             self.tracker.candidate_carriers(duration_s),
         )
         self.events.extend(self.registry.pop_pending_events())
-        self.events.extend(_final_events_from_tracks(tracks, self.registry, duration_s, self.config))
+        self.events.extend(_final_events_from_tracks(all_tracks, self.registry, duration_s, self.config))
+        tracks = filter_final_tracks(all_tracks, self.config)
         self._finished_result = StreamSimulationResult(
             duration_s=duration_s,
             updates=list(self.updates),
@@ -162,6 +163,7 @@ class StreamProcessor:
     def _process_decode_frame(self, frame: SpectrumFrame) -> None:
         self.frames.append(frame)
         self.frames_processed += 1
+        self._prune_hard_history_limit(frame.start_s)
         if frame.start_s - self.last_emit_s < self.config.emit_interval_s:
             return
 
@@ -187,6 +189,16 @@ class StreamProcessor:
             self.active_pruned_frames += dropped_count
         elif prune_reason == "finalized":
             self.finalized_pruned_frames += dropped_count
+        self._prune_hard_history_limit(self.frames[-1].start_s if self.frames else 0.0)
+
+    def _prune_hard_history_limit(self, now_s: float) -> None:
+        self.frames, dropped_count = _prune_hard_history_limit(
+            self.frames,
+            self.registry,
+            self.config,
+            now_s,
+        )
+        self.pruned_frames += dropped_count
 
 
 def simulate_stream_from_wav(path: Path, config: StreamingConfig | None = None) -> StreamSimulationResult:
@@ -240,7 +252,12 @@ def _live_decode_view_frames(
 
     cutoff = registry.prune_cutoff_s()
     if cutoff is None:
-        return frames
+        return _trim_frames_by_hard_history_limit(
+            frames,
+            registry,
+            config,
+            frames[-1].start_s if frames else 0.0,
+        )
 
     prune_before_s, reason = cutoff
     margin_s = config.history_margin_s
@@ -251,7 +268,46 @@ def _live_decode_view_frames(
     first_keep_index = 0
     while first_keep_index < len(frames) and frames[first_keep_index].start_s < keep_from_s:
         first_keep_index += 1
+    return _trim_frames_by_hard_history_limit(
+        frames[first_keep_index:],
+        registry,
+        config,
+        frames[-1].start_s if frames else 0.0,
+    )
+
+
+def _prune_hard_history_limit(
+    frames: list[SpectrumFrame],
+    registry: ChannelRegistry,
+    config: StreamingConfig,
+    now_s: float,
+) -> tuple[list[SpectrumFrame], int]:
+    trimmed = _trim_frames_by_hard_history_limit(frames, registry, config, now_s)
+    return trimmed, len(frames) - len(trimmed)
+
+
+def _trim_frames_by_hard_history_limit(
+    frames: list[SpectrumFrame],
+    registry: ChannelRegistry,
+    config: StreamingConfig,
+    now_s: float,
+) -> list[SpectrumFrame]:
+    limit_s = _effective_hard_history_limit_s(registry, config)
+    if limit_s is None or not frames:
+        return frames
+
+    keep_from_s = max(0.0, now_s - limit_s)
+    first_keep_index = 0
+    while first_keep_index < len(frames) and frames[first_keep_index].start_s < keep_from_s:
+        first_keep_index += 1
     return frames[first_keep_index:]
+
+
+def _effective_hard_history_limit_s(registry: ChannelRegistry, config: StreamingConfig) -> float | None:
+    if not registry.channels and config.max_idle_history_s is not None:
+        return config.max_idle_history_s
+    return config.max_history_s
+
 
 def _prune_stream_frames(
     frames: list[SpectrumFrame],
@@ -407,7 +463,7 @@ def _final_tracks_from_frames(
             )
         )
     results.sort(key=lambda result: (result.track_id, result.quality.score))
-    return filter_final_tracks(results, config)
+    return results
 
 
 def _merge_final_carriers(
@@ -446,6 +502,10 @@ def _combined_decode_from_sessions(sessions: list[StreamSessionResult], carrier_
     )
 
 
+def _should_publish_final_session_event(session: StreamSessionResult, config: StreamingConfig) -> bool:
+    return config.max_final_score is None or session.quality.score <= config.max_final_score
+
+
 def _final_events_from_tracks(
     tracks: list[StreamTrackResult],
     registry: ChannelRegistry,
@@ -470,6 +530,7 @@ def _final_events_from_tracks(
         for session in sessions:
             if track is not None and session.session_id in track.finalized_session_ids:
                 continue
+            should_publish = _should_publish_final_session_event(session, config)
             events.append(
                 StreamEvent(
                     time_s=round(session.final_time_s, 3),
@@ -477,9 +538,9 @@ def _final_events_from_tracks(
                     channel_id=result.track_id,
                     session_id=session.session_id,
                     carrier_hz=result.carrier_hz,
-                    text=session.decoded.text,
+                    text=session.decoded.text if should_publish else "",
                     score=session.quality.score,
-                    reason=session.final_reason,
+                    reason=session.final_reason if should_publish else "quality_suppressed",
                 )
             )
             if track is not None:

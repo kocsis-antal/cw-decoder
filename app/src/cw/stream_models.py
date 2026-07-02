@@ -15,10 +15,19 @@ class StreamingConfig:
     hop_ms: float = 5.0
     tracker_frame_ms: float | None = None
     tracker_hop_ms: float | None = None
+    max_history_s: float | None = None
+    max_idle_history_s: float | None = None
     min_tone_hz: float = 200.0
     max_tone_hz: float = 2000.0
     bandwidth_hz: float = 40.0
     threshold_ratio: float = 0.35
+    threshold_ratios: tuple[float, ...] = ()
+    adaptive_gap_thresholds: bool = True
+    element_letter_gap_units: float = 2.0
+    default_word_gap_units: float = 7.0
+    gap_cluster_min_ratio: float = 1.45
+    gap_cluster_min_delta_units: float = 1.0
+    gap_cluster_min_lower_count: int = 2
     peak_relative_threshold: float = 0.25
     track_relative_threshold: float = 0.10
     min_peak_snr_db: float = 0.0
@@ -55,6 +64,7 @@ class StreamingConfig:
     shadow_score_margin: float = 15.0
     session_gap_units: float = 20.0
     min_session_gap_s: float = 1.20
+    finalization_delay_s: float = 0.0
     final_event_reason: str = "end_of_stream"
     prune_finalized_sessions: bool = True
     prune_committed_active_sessions: bool = False
@@ -80,7 +90,7 @@ class StreamEvent:
     session_id: int | None
     carrier_hz: float
     text: str = ""
-    score: float = 0.0
+    score: float | None = None
     reason: str = ""
 
 
@@ -177,12 +187,29 @@ def validate_streaming_config(config: StreamingConfig) -> None:
         raise ValueError("tracker_frame_ms must be positive when set")
     if config.tracker_hop_ms is not None and config.tracker_hop_ms <= 0:
         raise ValueError("tracker_hop_ms must be positive when set")
+    if config.max_history_s is not None and config.max_history_s <= 0:
+        raise ValueError("max_history_s must be positive when set")
+    if config.max_idle_history_s is not None and config.max_idle_history_s <= 0:
+        raise ValueError("max_idle_history_s must be positive when set")
     if config.min_tone_hz >= config.max_tone_hz:
         raise ValueError("min_tone_hz must be lower than max_tone_hz")
     if config.bandwidth_hz <= 0:
         raise ValueError("bandwidth_hz must be positive")
     if not 0 < config.threshold_ratio < 1:
         raise ValueError("threshold_ratio must be in the (0, 1) range")
+    for threshold_ratio in config.threshold_ratios:
+        if not 0 < threshold_ratio < 1:
+            raise ValueError("threshold_ratios values must be in the (0, 1) range")
+    if config.element_letter_gap_units <= 0:
+        raise ValueError("element_letter_gap_units must be positive")
+    if config.default_word_gap_units <= config.element_letter_gap_units:
+        raise ValueError("default_word_gap_units must be greater than element_letter_gap_units")
+    if config.gap_cluster_min_ratio < 1:
+        raise ValueError("gap_cluster_min_ratio must be at least 1")
+    if config.gap_cluster_min_delta_units < 0:
+        raise ValueError("gap_cluster_min_delta_units must not be negative")
+    if config.gap_cluster_min_lower_count < 1:
+        raise ValueError("gap_cluster_min_lower_count must be positive")
     if not 0 < config.peak_relative_threshold <= 1:
         raise ValueError("peak_relative_threshold must be in the (0, 1] range")
     if not 0 < config.track_relative_threshold <= 1:

@@ -156,3 +156,20 @@ def test_channel_registry_suppresses_bad_final_session_but_uses_it_for_stale_cut
     assert registry.sync_sessions(channel, [stale_variant]) is None
     assert registry.pop_pending_events() == []
     assert channel.session_id == 2
+
+
+def test_channel_registry_ignores_old_retained_segment_after_new_active_session_started() -> None:
+    config = StreamingConfig()
+    registry = ChannelRegistry(config)
+    channel = registry.channel_for(700.0, time_s=0.0)
+    registry.pop_pending_events()
+
+    active = registry.sync_sessions(channel, [_session("CQ", first=10.0, last=11.0, reason="end_of_stream")])
+    assert active is not None
+    assert channel.session_id == 1
+    assert channel.current_session.first_seen_s == 10.0
+
+    old_retained_final = _session("OLD", first=4.0, last=5.0, reason="silence_gap")
+    assert registry.sync_sessions(channel, [old_retained_final]) is None
+    assert registry.pop_pending_events() == []
+    assert channel.session_id == 1

@@ -1,0 +1,112 @@
+{"carrier_hz": 824.948, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": null, "session_id": null, "text": "", "time_s": 0.015, "type": "CHANNEL_STARTED"}
+{"carrier_hz": 824.948, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": null, "session_id": 1, "text": "", "time_s": 0.015, "type": "SESSION_STARTED"}
+{"carrier_hz": 824.947, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 0.0, "session_id": 1, "text": "I", "time_s": 1.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 1825.0, "channel_id": 2, "reason": "", "schema": "cw.stream.event.v1", "score": null, "session_id": null, "text": "", "time_s": 0.0, "type": "CHANNEL_STARTED"}
+{"carrier_hz": 1825.0, "channel_id": 2, "reason": "", "schema": "cw.stream.event.v1", "score": null, "session_id": 1, "text": "", "time_s": 0.0, "type": "SESSION_STARTED"}
+{"carrier_hz": 824.958, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 12.857, "session_id": 1, "text": "IO", "time_s": 1.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 1825.498, "channel_id": 2, "reason": "", "schema": "cw.stream.event.v1", "score": 13.984, "session_id": 1, "text": "SE", "time_s": 2.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 1825.141, "channel_id": 2, "reason": "", "schema": "cw.stream.event.v1", "score": 12.23, "session_id": 1, "text": "SE J", "time_s": 2.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.412, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 7.372, "session_id": 1, "text": "IO B", "time_s": 2.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 1824.821, "channel_id": 2, "reason": "", "schema": "cw.stream.event.v1", "score": 13.461, "session_id": 1, "text": "SE J6", "time_s": 3.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 1824.857, "channel_id": 2, "reason": "", "schema": "cw.stream.event.v1", "score": 13.461, "session_id": 1, "text": "SE J6Z", "time_s": 4.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.144, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 7.229, "session_id": 1, "text": "IO B BEN", "time_s": 4.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 1824.886, "channel_id": 2, "reason": "", "schema": "cw.stream.event.v1", "score": 14.789, "session_id": 1, "text": "SE J6ZM", "time_s": 4.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.115, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 7.229, "session_id": 1, "text": "IO B BENUT", "time_s": 4.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.159, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 7.252, "session_id": 1, "text": "IO B BENUTT", "time_s": 5.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 1824.25, "channel_id": 2, "reason": "", "schema": "cw.stream.event.v1", "score": 12.889, "session_id": 1, "text": "SE J6ZM D", "time_s": 5.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.137, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 8.282, "session_id": 1, "text": "IO B BENUTT E", "time_s": 5.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 1824.397, "channel_id": 2, "reason": "", "schema": "cw.stream.event.v1", "score": 12.786, "session_id": 1, "text": "SE J6ZM DJ", "time_s": 6.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.111, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 18.084, "session_id": 1, "text": "IO B BENUTT E I", "time_s": 6.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.093, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 18.084, "session_id": 1, "text": "IO B BENUTT E ID", "time_s": 6.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 1825.08, "channel_id": 2, "reason": "", "schema": "cw.stream.event.v1", "score": 12.718, "session_id": 1, "text": "SE J6ZM DJD", "time_s": 7.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 1824.863, "channel_id": 2, "reason": "", "schema": "cw.stream.event.v1", "score": 11.447, "session_id": 1, "text": "SE J6ZM DJD D", "time_s": 7.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.428, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 19.183, "session_id": 1, "text": "IO B BENUTT E ID E", "time_s": 7.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 1824.357, "channel_id": 2, "reason": "", "schema": "cw.stream.event.v1", "score": 11.386, "session_id": 1, "text": "SE J6ZM DJD DM", "time_s": 8.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.352, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 16.356, "session_id": 1, "text": "IO B BENUTT E ID E6", "time_s": 8.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 1823.753, "channel_id": 2, "reason": "", "schema": "cw.stream.event.v1", "score": 11.129, "session_id": 1, "text": "SE J6ZM DJD DM P", "time_s": 9.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 1822.971, "channel_id": 2, "reason": "silence_gap", "schema": "cw.stream.event.v1", "score": 14.382, "session_id": 1, "text": "SE EJ6ZM DJD DM P", "time_s": 10.1, "type": "SESSION_FINAL"}
+{"carrier_hz": 1824.49, "channel_id": 2, "reason": "", "schema": "cw.stream.event.v1", "score": null, "session_id": 2, "text": "", "time_s": 15.06, "type": "SESSION_STARTED"}
+{"carrier_hz": 826.51, "channel_id": 1, "reason": "silence_gap", "schema": "cw.stream.event.v1", "score": 11.851, "session_id": 1, "text": "61T M IT 1 TT W UNE", "time_s": 16.22, "type": "SESSION_FINAL"}
+{"carrier_hz": 1824.524, "channel_id": 2, "reason": "", "schema": "cw.stream.event.v1", "score": 16.364, "session_id": 2, "text": "C", "time_s": 16.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 826.264, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": null, "session_id": 2, "text": "", "time_s": 14.82, "type": "SESSION_STARTED"}
+{"carrier_hz": 1824.619, "channel_id": 2, "reason": "", "schema": "cw.stream.event.v1", "score": 13.895, "session_id": 2, "text": "CM", "time_s": 17.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.647, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 20.094, "session_id": 2, "text": "E", "time_s": 18.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.518, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 24.418, "session_id": 2, "text": "EE", "time_s": 19.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.414, "channel_id": 1, "reason": "silence_gap", "schema": "cw.stream.event.v1", "score": 21.838, "session_id": 2, "text": "EE EIN DOH", "time_s": 19.145, "type": "SESSION_FINAL"}
+{"carrier_hz": 825.327, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": null, "session_id": 3, "text": "", "time_s": 30.315, "type": "SESSION_STARTED"}
+{"carrier_hz": 825.392, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 0.0, "session_id": 3, "text": "WT", "time_s": 31.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.399, "channel_id": 1, "reason": "quality_suppressed", "schema": "cw.stream.event.v1", "score": 66.364, "session_id": 3, "text": "", "time_s": 32.49, "type": "SESSION_FINAL"}
+{"carrier_hz": 825.253, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": null, "session_id": 4, "text": "", "time_s": 32.705, "type": "SESSION_STARTED"}
+{"carrier_hz": 1825.079, "channel_id": 2, "reason": "silence_gap", "schema": "cw.stream.event.v1", "score": 13.832, "session_id": 2, "text": "D T FQDE DW HZM DJ6ZM DJ6ZM PSEK", "time_s": 33.6, "type": "SESSION_FINAL"}
+{"carrier_hz": 825.205, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 5.16, "session_id": 4, "text": "A", "time_s": 34.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.34, "channel_id": 1, "reason": "silence_gap", "schema": "cw.stream.event.v1", "score": 8.101, "session_id": 4, "text": "CH R REN", "time_s": 37.315, "type": "SESSION_FINAL"}
+{"carrier_hz": 825.273, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": null, "session_id": 5, "text": "", "time_s": 37.11, "type": "SESSION_STARTED"}
+{"carrier_hz": 1825.113, "channel_id": 2, "reason": "", "schema": "cw.stream.event.v1", "score": null, "session_id": 3, "text": "", "time_s": 37.375, "type": "SESSION_STARTED"}
+{"carrier_hz": 1825.098, "channel_id": 2, "reason": "", "schema": "cw.stream.event.v1", "score": 13.412, "session_id": 3, "text": "QS", "time_s": 39.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.236, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 12.478, "session_id": 5, "text": "BT", "time_s": 40.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.191, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 11.816, "session_id": 5, "text": "BT2 V", "time_s": 40.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.12, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 3.03, "session_id": 5, "text": "BT2 V TE", "time_s": 43.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.097, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 3.849, "session_id": 5, "text": "BT2 V TE GE", "time_s": 43.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.0, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 3.849, "session_id": 5, "text": "BT2 V TE GEST", "time_s": 44.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.004, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 6.827, "session_id": 5, "text": "BT2 V TE GEST DE", "time_s": 45.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.024, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 3.729, "session_id": 5, "text": "BT2 V TE GEST DES", "time_s": 45.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.771, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 4.082, "session_id": 5, "text": "BT2 V TE GEST DESSE", "time_s": 46.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.749, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 5.249, "session_id": 5, "text": "BT2 V TE GEST DESSER", "time_s": 46.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.59, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 4.788, "session_id": 5, "text": "BT2 V TE GEST DESSER N", "time_s": 47.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.267, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 4.743, "session_id": 5, "text": "BT2 V TE GEST DESSER NA", "time_s": 47.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.211, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 3.972, "session_id": 5, "text": "BT2 V TE GEST DESSER NAC", "time_s": 48.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.169, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 3.881, "session_id": 5, "text": "BT2 V TE GEST DESSER NACH", "time_s": 48.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.115, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 5.104, "session_id": 5, "text": "BT2 V TE GEST DESSER NACH D", "time_s": 49.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.092, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 5.9, "session_id": 5, "text": "BT2 V TE GEST DESSER NACH DE", "time_s": 49.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.14, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 5.26, "session_id": 5, "text": "BT2 V TE GEST DESSER NACH DEN", "time_s": 50.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.109, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 5.485, "session_id": 5, "text": "BT2 V TE GEST DESSER NACH DEN H", "time_s": 50.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.207, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 5.416, "session_id": 5, "text": "BT2 V TE GEST DESSER NACH DEN HIT", "time_s": 51.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.166, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 5.781, "session_id": 5, "text": "BT2 V TE GEST DESSER NACH DEN HITZ", "time_s": 51.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.192, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 5.348, "session_id": 5, "text": "BT2 V TE GEST DESSER NACH DEN HITZE", "time_s": 52.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.158, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 5.243, "session_id": 5, "text": "BT2 V TE GEST DESSER NACH DEN HITZEN T", "time_s": 52.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 824.626, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 5.23, "session_id": 5, "text": "BT2 V TE GEST DESSER NACH DEN HITZEN TA", "time_s": 53.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 824.712, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 5.879, "session_id": 5, "text": "BT2 V TE GEST DESSER NACH DEN HITZEN TAG", "time_s": 53.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 824.77, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 6.415, "session_id": 5, "text": "BT2 V TE GEST DESSER NACH DEN HITZEN TAGEN", "time_s": 54.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.753, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 4.966, "session_id": 5, "text": "BT2 V TE GEST DESSER NACH DEN HITZEN TAGEN=", "time_s": 55.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.507, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 5.47, "session_id": 5, "text": "BT2 V TE GEST DESSER NACH DEN HITZEN TAGEN= H", "time_s": 55.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.405, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 5.541, "session_id": 5, "text": "BT2 V TE GEST DESSER NACH DEN HITZEN TAGEN= HEE", "time_s": 56.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.324, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 5.643, "session_id": 5, "text": "BT2 V TE GEST DESSER NACH DEN HITZEN TAGEN= HEE=", "time_s": 56.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.251, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 6.337, "session_id": 5, "text": "BT2 V TE GEST DESSER NACH DEN HITZEN TAGEN= HEE=D", "time_s": 57.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.201, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 6.223, "session_id": 5, "text": "BT2 V TE GEST DESSER NACH DEN HITZEN TAGEN= HEE=DI", "time_s": 57.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.03, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 6.056, "session_id": 5, "text": "BT2 V TE GEST DESSER NACH DEN HITZEN TAGEN= HEE=DIR", "time_s": 58.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.024, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 6.99, "session_id": 5, "text": "BT2 V TE GEST DESSER NACH DEN HITZEN TAGEN= HEE=DIRK", "time_s": 58.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.019, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 5.906, "session_id": 5, "text": "BT2 V TE GEST DESSER NACH DEN HITZEN TAGEN= HEE=DIRKH", "time_s": 59.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.853, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 22.678, "session_id": 5, "text": "BT2 V TE GEST DESSER NACH DEN HITZEN TAGEN= HEE=DIRKH S BC", "time_s": 89.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.6, "channel_id": 1, "reason": "silence_gap", "schema": "cw.stream.event.v1", "score": 26.659, "session_id": 5, "text": "BT2 V TE GEST DESSER NACH DEN HITZEN TAGEN= HEE=DIRKH S BC", "time_s": 90.1, "type": "SESSION_FINAL"}
+{"carrier_hz": 825.525, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": null, "session_id": 6, "text": "", "time_s": 90.385, "type": "SESSION_STARTED"}
+{"carrier_hz": 825.229, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 8.836, "session_id": 6, "text": "=", "time_s": 92.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.183, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 7.62, "session_id": 6, "text": "= RI", "time_s": 92.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.544, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 9.744, "session_id": 6, "text": "= RIG", "time_s": 93.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.935, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 6.685, "session_id": 6, "text": "= RIG I", "time_s": 94.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 826.248, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 6.685, "session_id": 6, "text": "= RIG IC", "time_s": 94.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.602, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 8.641, "session_id": 6, "text": "= RIG IC 7", "time_s": 96.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.417, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 5.537, "session_id": 6, "text": "= RIG IC 7 7", "time_s": 97.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.334, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 5.709, "session_id": 6, "text": "= RIG IC 7 7 6", "time_s": 97.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 824.687, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 6.135, "session_id": 6, "text": "= RIG IC 7 7 6 0 E", "time_s": 99.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 824.695, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 6.191, "session_id": 6, "text": "= RIG IC 7 7 6 0 ES", "time_s": 99.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 824.391, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 7.562, "session_id": 6, "text": "= RIG IC 7 7 6 0 ES2", "time_s": 100.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 824.553, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 6.167, "session_id": 6, "text": "= RIG IC 7 7 6 0 ES2O", "time_s": 101.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 824.49, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 10.294, "session_id": 6, "text": "= RIG IC 7 7 6 0 ES2OO", "time_s": 102.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.472, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 9.818, "session_id": 6, "text": "= RIG IC 7 7 6 0 ES2OOW", "time_s": 103.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.379, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 6.761, "session_id": 6, "text": "= RIG IC 7 7 6 0 ES2OOW O", "time_s": 103.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.623, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 11.015, "session_id": 6, "text": "= RIG IC 7 7 6 0 ES2OOW OUE", "time_s": 104.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 826.157, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 11.233, "session_id": 6, "text": "= RIG IC 7 7 6 0 ES2OOW OUE E", "time_s": 104.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 826.421, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 12.404, "session_id": 6, "text": "= RIG IC 7 7 6 0 ES2OOW OUE ES", "time_s": 105.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 826.24, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 11.102, "session_id": 6, "text": "= RIG IC 7 7 6 0 ES2OOW OUE ES A", "time_s": 105.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 826.501, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 11.045, "session_id": 6, "text": "= RIG IC 7 7 6 0 ES2OOW OUE ES ANT", "time_s": 106.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 826.368, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 10.942, "session_id": 6, "text": "= RIG IC 7 7 6 0 ES2OOW OUE ES ANT G", "time_s": 107.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 826.219, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 10.713, "session_id": 6, "text": "= RIG IC 7 7 6 0 ES2OOW OUE ES ANT GP", "time_s": 108.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 826.245, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 10.767, "session_id": 6, "text": "= RIG IC 7 7 6 0 ES2OOW OUE ES ANT GP P", "time_s": 109.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 827.569, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 8.739, "session_id": 6, "text": "= RIG IC 7 7 6 0 ES2OOW OUE ES ANT GP P G P", "time_s": 111.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 828.819, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 8.77, "session_id": 6, "text": "= RIG IC 7 7 6 0 ES2OOW OUE ES ANT GP P G P 1", "time_s": 113.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 827.355, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 8.529, "session_id": 6, "text": "= RIG IC 7 7 6 0 ES2OOW OUE ES ANT GP P G P 10", "time_s": 114.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 827.4, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 8.616, "session_id": 6, "text": "= RIG IC 7 7 6 0 ES2OOW OUE ES ANT GP P G P 10M", "time_s": 115.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 826.544, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 7.092, "session_id": 6, "text": "= RIG IC 7 7 6 0 ES2OOW OUE ES ANT GP P G P 10M H", "time_s": 116.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 826.12, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 7.277, "session_id": 6, "text": "= RIG IC 7 7 6 0 ES2OOW OUE ES ANT GP P G P 10M HO", "time_s": 117.0, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 825.944, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 7.261, "session_id": 6, "text": "= RIG IC 7 7 6 0 ES2OOW OUE ES ANT GP P G P 10M HOC", "time_s": 117.5, "type": "TEXT_COMMITTED"}
+{"carrier_hz": 826.268, "channel_id": 1, "reason": "", "schema": "cw.stream.event.v1", "score": 6.984, "session_id": 6, "text": "= RIG IC 7 7 6 0 ES2OOW OUE ES ANT GP P G P 10M HOCH", "time_s": 118.0, "type": "TEXT_COMMITTED"}

@@ -25,7 +25,7 @@ def stream_event_to_dict(event: StreamEvent) -> dict[str, Any]:
         "session_id": event.session_id if event.session_id is None else int(event.session_id),
         "carrier_hz": _rounded_float(event.carrier_hz),
         "text": event.text,
-        "score": None if event.score == 0.0 else _rounded_float(event.score),
+        "score": None if event.score is None else _rounded_float(event.score),
         "reason": event.reason,
     }
 

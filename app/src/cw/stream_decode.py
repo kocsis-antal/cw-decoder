@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 
 from cw.decoder import (
+    ClassifiedRun,
     DecodeResult,
     DecoderConfig,
     DetectedRun,
@@ -72,18 +75,52 @@ def decode_carrier_sessions_from_frames(
     if len(energy) == 0 or float(np.max(energy)) <= 0:
         return []
 
+    threshold_ratios = _threshold_candidate_ratios(config)
+    if len(threshold_ratios) == 1:
+        return _decode_sessions_for_threshold_ratio(
+            energy,
+            frames[0].start_s,
+            carrier_hz,
+            threshold_ratios[0],
+            config,
+            final_time_s,
+        )
+
+    candidates: list[StreamSessionResult] = []
+    for threshold_ratio in threshold_ratios:
+        candidates.extend(
+            _decode_sessions_for_threshold_ratio(
+                energy,
+                frames[0].start_s,
+                carrier_hz,
+                threshold_ratio,
+                config,
+                final_time_s,
+            )
+        )
+    return _select_threshold_session_candidates(candidates, config)
+
+
+def _decode_sessions_for_threshold_ratio(
+    energy: np.ndarray,
+    first_frame_start_s: float,
+    carrier_hz: float,
+    threshold_ratio: float,
+    config: StreamingConfig,
+    final_time_s: float,
+) -> list[StreamSessionResult]:
     decoder_config = DecoderConfig(
         frame_ms=config.frame_ms,
         hop_ms=config.hop_ms,
         min_tone_hz=config.min_tone_hz,
         max_tone_hz=config.max_tone_hz,
         bandwidth_hz=config.bandwidth_hz,
-        threshold_ratio=config.threshold_ratio,
+        threshold_ratio=threshold_ratio,
         target_tone_hz=carrier_hz,
     )
     threshold = _energy_threshold(energy, decoder_config)
     active = energy > threshold
-    runs = _offset_runs(_runs_from_activity(active, config.hop_ms / 1000), frames[0].start_s)
+    runs = _offset_runs(_runs_from_activity(active, config.hop_ms / 1000), first_frame_start_s)
     runs = smooth_keying_runs(
         runs,
         merge_short_gaps_s=config.merge_short_gaps_ms / 1000,
@@ -95,7 +132,12 @@ def decode_carrier_sessions_from_frames(
         return []
 
     gap_threshold_s = max(config.min_session_gap_s, config.session_gap_units * unit_s)
-    segments = _split_runs_by_session_gap(runs, gap_threshold_s, final_time_s)
+    segments = _split_runs_by_session_gap(
+        runs,
+        gap_threshold_s,
+        final_time_s,
+        finalization_delay_s=config.finalization_delay_s,
+    )
     sessions: list[StreamSessionResult] = []
     for index, (segment_runs, session_final_time_s, reason) in enumerate(segments, start=1):
         decoded = _decode_run_segment(segment_runs, carrier_hz, threshold, config)
@@ -119,6 +161,113 @@ def decode_carrier_sessions_from_frames(
     return sessions
 
 
+def _threshold_candidate_ratios(config: StreamingConfig) -> tuple[float, ...]:
+    ratios = [config.threshold_ratio, *config.threshold_ratios]
+    unique: list[float] = []
+    for ratio in ratios:
+        rounded = round(float(ratio), 6)
+        if rounded not in unique:
+            unique.append(rounded)
+    return tuple(sorted(unique))
+
+
+def _select_threshold_session_candidates(
+    candidates: list[StreamSessionResult],
+    config: StreamingConfig,
+) -> list[StreamSessionResult]:
+    if not candidates:
+        return []
+
+    # A single fixed threshold can split a real transmission into several
+    # neat-looking fragments while a lower threshold keeps the whole over
+    # together.  The earlier implementation grouped candidates by *any*
+    # overlap and picked the lowest raw timing score; that often discarded the
+    # longer, more complete decode just because a short fragment had a prettier
+    # score.  Select a non-overlapping candidate set instead: alternatives that
+    # cover the same time compete, but two genuinely separate overs can both be
+    # kept.  The reward is content-neutral: decoded evidence length minus signal
+    # quality penalties, with no CQ/DE/callsign bias.
+    tolerance_s = max(config.hop_ms / 1000 * 8, 0.06)
+    ordered = sorted(candidates, key=lambda item: (item.last_seen_s, item.first_seen_s, item.quality.score))
+    previous_indices = [_previous_non_overlapping_index(ordered, index, tolerance_s) for index in range(len(ordered))]
+
+    # Dynamic programming table.  Each value is (selection_score, tiebreak_tuple, chosen_indices).
+    # The tiebreak tuple is maximized, so negative quality means lower aggregate
+    # quality score wins when the evidence reward is effectively tied.
+    dp: list[tuple[float, tuple[float, int, int, int], list[int]]] = [(0.0, (0.0, 0, 0, 0), [])]
+    for index, candidate in enumerate(ordered):
+        skip = dp[index]
+        prev = dp[previous_indices[index] + 1]
+        reward = _threshold_candidate_reward(candidate, config)
+        tie = _threshold_candidate_tiebreak(candidate, config)
+        take = (
+            prev[0] + reward,
+            (
+                prev[1][0] + tie[0],
+                prev[1][1] + tie[1],
+                prev[1][2] + tie[2],
+                prev[1][3] + tie[3],
+            ),
+            [*prev[2], index],
+        )
+        dp.append(max(skip, take, key=lambda item: (round(item[0], 6), item[1])))
+
+    chosen_indices = dp[-1][2]
+    if not chosen_indices:
+        chosen = [min(candidates, key=lambda item: _threshold_choice_score(item, config))]
+    else:
+        chosen = [ordered[index] for index in chosen_indices]
+    chosen.sort(key=lambda item: (item.first_seen_s, item.last_seen_s))
+    return [replace(session, session_id=index) for index, session in enumerate(chosen, start=1)]
+
+
+def _previous_non_overlapping_index(
+    sessions: list[StreamSessionResult],
+    index: int,
+    tolerance_s: float,
+) -> int:
+    current = sessions[index]
+    for previous_index in range(index - 1, -1, -1):
+        if sessions[previous_index].last_seen_s <= current.first_seen_s - tolerance_s:
+            return previous_index
+    return -1
+
+
+def _sessions_overlap(left: StreamSessionResult, right: StreamSessionResult, tolerance_s: float) -> bool:
+    return left.first_seen_s <= right.last_seen_s + tolerance_s and right.first_seen_s <= left.last_seen_s + tolerance_s
+
+
+def _threshold_choice_score(session: StreamSessionResult, config: StreamingConfig) -> tuple[float, int, int, float]:
+    text = session.decoded.text
+    unknowns = text.count("?")
+    known_chars = _known_text_chars(text)
+    punctuation_count = _punctuation_count(text)
+    score = session.quality.score + punctuation_count * config.punctuation_penalty
+    return (score, unknowns, -known_chars, session.quality.score)
+
+
+def _threshold_candidate_reward(session: StreamSessionResult, config: StreamingConfig) -> float:
+    text = session.decoded.text
+    known_chars = _known_text_chars(text)
+    if known_chars <= 0:
+        return -1000.0
+    unknowns = text.count("?")
+    punctuation_count = _punctuation_count(text)
+    score = session.quality.score + punctuation_count * config.punctuation_penalty
+    # A known decoded character is useful evidence; bad timing/unknowns/punctuation
+    # reduce confidence.  These constants intentionally do not encode QSO words.
+    return known_chars * 2.0 - score * 0.25 - unknowns * 1.5 - punctuation_count * 0.5
+
+
+def _threshold_candidate_tiebreak(session: StreamSessionResult, config: StreamingConfig) -> tuple[float, int, int, int]:
+    text = session.decoded.text
+    punctuation_count = _punctuation_count(text)
+    score = session.quality.score + punctuation_count * config.punctuation_penalty
+    return (-score, _known_text_chars(text), -text.count("?"), -punctuation_count)
+
+
+def _known_text_chars(text: str) -> int:
+    return sum(1 for char in text if not char.isspace() and char != "?")
 
 
 def smooth_keying_runs(
@@ -241,15 +390,19 @@ def _split_runs_by_session_gap(
     runs: list[DetectedRun],
     gap_threshold_s: float,
     final_time_s: float,
+    *,
+    finalization_delay_s: float = 0.0,
 ) -> list[tuple[list[DetectedRun], float, str]]:
     segments: list[tuple[list[DetectedRun], float, str]] = []
     current: list[DetectedRun] = []
 
     for run in runs:
         if run.kind == "gap" and run.duration_s >= gap_threshold_s and _has_tone(current):
-            segments.append((current, run.start_s + gap_threshold_s, "silence_gap"))
-            current = []
-            continue
+            close_time_s = run.start_s + gap_threshold_s
+            if close_time_s + finalization_delay_s <= final_time_s:
+                segments.append((current, close_time_s, "silence_gap"))
+                current = []
+                continue
         if current or run.kind == "tone":
             current.append(run)
 
@@ -270,7 +423,7 @@ def _decode_run_segment(
         return _empty_decode(carrier_hz, threshold=threshold, runs=runs)
 
     candidates = _unit_candidates(unit_s, config.unit_candidate_spread, config.unit_candidate_steps)
-    decoded_candidates = [_decode_with_unit(runs, carrier_hz, threshold, candidate) for candidate in candidates]
+    decoded_candidates = [_decode_with_unit(runs, carrier_hz, threshold, candidate, config) for candidate in candidates]
     return min(
         decoded_candidates,
         key=lambda result: _decode_choice_score(result, config.punctuation_penalty),
@@ -282,8 +435,11 @@ def _decode_with_unit(
     carrier_hz: float,
     threshold: float,
     unit_s: float,
+    config: StreamingConfig | None = None,
 ) -> DecodeResult:
-    classified_runs = classify_runs(runs, unit_s)
+    classified_runs = (
+        _classify_runs_with_adaptive_gaps(runs, unit_s, config) if config is not None else classify_runs(runs, unit_s)
+    )
     tokens = _classified_runs_to_tokens(classified_runs)
     text = decode_tokens(tokens)
     return DecodeResult(
@@ -296,6 +452,109 @@ def _decode_with_unit(
         threshold=threshold,
     )
 
+
+def _classify_runs_with_adaptive_gaps(
+    runs: list[DetectedRun],
+    unit_s: float,
+    config: StreamingConfig,
+) -> list[ClassifiedRun]:
+    if not config.adaptive_gap_thresholds:
+        return classify_runs(runs, unit_s)
+
+    element_letter_units = config.element_letter_gap_units
+    letter_word_units = _adaptive_letter_word_boundary_units(runs, unit_s, config)
+    classified_runs: list[ClassifiedRun] = []
+
+    for run in runs:
+        units = run.duration_s / unit_s
+        if run.kind == "tone":
+            symbol = "." if units < 2 else "-"
+        elif units < element_letter_units:
+            symbol = "element_gap"
+        elif units < letter_word_units:
+            symbol = "letter_gap"
+        else:
+            symbol = "word_gap"
+
+        classified_runs.append(
+            ClassifiedRun(
+                kind=run.kind,
+                start_s=run.start_s,
+                duration_s=run.duration_s,
+                symbol=symbol,
+                units=round(units, 3),
+            )
+        )
+
+    return classified_runs
+
+
+def _adaptive_letter_word_boundary_units(
+    runs: list[DetectedRun],
+    unit_s: float,
+    config: StreamingConfig,
+) -> float:
+    """Estimate a session-local letter/word gap split from received timing.
+
+    Human CW and filtered live audio often stretch normal inter-letter gaps
+    beyond the textbook 3 units.  The old fixed boundary at 5 units then turned
+    ``CQ`` into ``C Q``.  This estimator treats gaps as timing observations: it
+    only creates a word-gap cluster when the longer gaps are clearly separated
+    from the letter-gap cluster.  Without a reliable split, moderately long gaps
+    remain letters, while very long pauses still become words.
+    """
+
+    if unit_s <= 0:
+        return config.default_word_gap_units
+
+    element_letter_units = config.element_letter_gap_units
+    gaps = sorted(
+        run.duration_s / unit_s
+        for run in runs
+        if run.kind == "gap" and run.duration_s > 0 and run.duration_s / unit_s >= element_letter_units
+    )
+    if len(gaps) < 2:
+        return config.default_word_gap_units
+
+    best_index = _best_letter_word_gap_split(gaps, config, min_upper_count=2)
+    if best_index is None:
+        best_index = _best_letter_word_gap_split(gaps, config, min_upper_count=1)
+
+    if best_index is not None:
+        left = gaps[best_index]
+        right = gaps[best_index + 1]
+        return (left * right) ** 0.5
+
+    return config.default_word_gap_units
+
+
+def _best_letter_word_gap_split(
+    gaps: list[float],
+    config: StreamingConfig,
+    *,
+    min_upper_count: int,
+) -> int | None:
+    best_index: int | None = None
+    best_ratio = 0.0
+    best_delta = 0.0
+    for index, (left, right) in enumerate(zip(gaps, gaps[1:])):
+        if left <= 0:
+            continue
+        lower_count = index + 1
+        upper_count = len(gaps) - lower_count
+        if lower_count < config.gap_cluster_min_lower_count or upper_count < min_upper_count:
+            continue
+        ratio = right / left
+        delta = right - left
+        if ratio < config.gap_cluster_min_ratio or delta < config.gap_cluster_min_delta_units:
+            continue
+        # Prefer the largest absolute separation.  A second pass with a single
+        # upper outlier is allowed only when no repeated word-gap cluster exists.
+        if delta > best_delta or (delta == best_delta and ratio > best_ratio):
+            best_index = index
+            best_ratio = ratio
+            best_delta = delta
+    return best_index
 
 def _has_tone(runs: list[DetectedRun]) -> bool:
     return any(run.kind == "tone" for run in runs)

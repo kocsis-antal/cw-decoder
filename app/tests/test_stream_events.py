@@ -96,3 +96,9 @@ def test_stream_sim_cli_can_emit_json_events(tmp_path: Path, capsys, monkeypatch
     assert "duration_s=" not in output
     assert all(payload["schema"] == STREAM_EVENT_SCHEMA for payload in payloads)
     assert any(payload["type"] == "SESSION_FINAL" and payload["text"] == "CQ DE YU7NKA" for payload in payloads)
+
+
+def test_stream_event_to_dict_preserves_explicit_zero_score() -> None:
+    event = StreamEvent(1.0, "TEXT_COMMITTED", 1, 1, 700.0, text="CQ", score=0.0)
+
+    assert stream_event_to_dict(event)["score"] == 0.0

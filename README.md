@@ -340,6 +340,7 @@ pactl list short sources | grep monitor
 
 ffmpeg -hide_banner -loglevel error \
   -f pulse -i "$(pactl get-default-sink).monitor" \
+  -af aresample=async=1:first_pts=0,asetpts=N/SR/TB \
   -f s16le -ac 1 -ar 8000 - \
 | docker compose -f infra/compose.yml run --rm -T cw python -m cw.cli stream-stdin \
     --sample-rate 8000 \
@@ -355,6 +356,8 @@ holding everything back, stdout may stay quiet even though audio is being read;
 also prints `rms_dbfs` and `peak_dbfs`, which are useful for spotting muted or
 very low-level monitor audio. A very quiet stream, for example below roughly
 `-45 dBFS`, is worth turning up before tuning decoder thresholds.
+
+With `ffmpeg` capture from PulseAudio/PipeWire, occasional non-monotonic DTS warnings are a host-side timestamp issue in the live audio capture path, not JSON emitted by the decoder. The `aresample`/`asetpts` filter in the example above regenerates monotonic audio timestamps before the raw PCM pipe. `parec` avoids that ffmpeg timestamp layer entirely and is often the cleaner live source when PulseAudio-compatible tools are available.
 
 For general live SDR work, avoid tuning the decoder to one hard-coded audio
 pitch range unless the capture is intentionally about one fixed station. Moving
@@ -416,9 +419,16 @@ Live input has two squelch layers by default. First, `stream-stdin` requires
 spectral peaks to stand at least `--min-peak-snr-db 14` dB above the per-frame
 spectral floor before they can become carrier tracks. Second, a CW keying gate
 keeps channels/sessions private until the decoded envelope looks like real keyed
-CW rather than a steady carrier or short `E`/`T` noise. The stdin defaults are:
+CW rather than a steady carrier or short `E`/`T` noise. Live raw-input commands also default to separate STFT paths: 30 ms / 5 ms for Morse timing and 80 ms / 10 ms for carrier tracking. Their retained frame history is hard-limited by default with `--max-history-s 60` and `--max-idle-history-s 20`, so a noisy live source cannot grow memory and CPU indefinitely while waiting for a publishable CW session. WAV `stream-sim` remains conservative and keeps those hard limits disabled unless you pass them explicitly.
+
+The stdin defaults are:
 
 ```text
+--tracker-frame-ms 80
+--tracker-hop-ms 10
+--max-history-s 60
+--max-idle-history-s 20
+--max-tone-hz 3000
 --min-keying-tone-runs 3
 --min-keying-chars 2
 --min-keying-known-chars 2
@@ -481,6 +491,7 @@ ts=$(date +%Y%m%d-%H%M%S)
 
 ffmpeg -hide_banner -loglevel error \
   -f pulse -i "$(pactl get-default-sink).monitor" \
+  -af aresample=async=1:first_pts=0,asetpts=N/SR/TB \
   -f s16le -ac 1 -ar 8000 - \
 | docker compose -f infra/compose.yml run --rm -T cw \
     python -m cw.cli stream-stdin \
@@ -545,6 +556,8 @@ stream_sources.py block-based WAV/array/raw-PCM audio sources for replay and liv
 stream_processor.py stateful push/finish live processor and pruning orchestration
 streaming.py      compatibility/public API re-exports
 ```
+
+The command-line surface is also split by responsibility: `cli.py` is only the entry point, `cli_app.py` builds argparse commands, `cli_commands.py` runs subcommands, `cli_options.py` owns shared option/config builders, `cli_stream.py` owns live-stream printing, and `cli_format.py` owns common human-readable formatting.
 
 
 The tracker keeps smoothed carrier estimates, marks tracks dormant after `--max-track-gap-s`, rejects per-frame peaks below `--min-peak-snr-db`, and filters long-term weak sidebands/noise through `--track-relative-threshold`. Peak separation, frame-to-frame track matching, and channel-level merging are separate configuration knobs, so experiments can distinguish "two spectral peaks", "same drifting carrier track", and "same GUI/logical channel". The mutable live state is explicit: `ChannelState` is the long-lived carrier/GUI anchor, while `SessionState` owns the current transmission's committed prefix, active prune boundary, and start/final bookkeeping. Decoded tempo/unit values still come from each `StreamSessionResult`, so a later reply on the same channel starts with a clean session-level timing estimate instead of inheriting the previous operator's tempo.

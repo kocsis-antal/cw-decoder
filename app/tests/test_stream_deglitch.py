@@ -64,3 +64,23 @@ def test_live_deglitch_config_accepts_reasonable_defaults() -> None:
             punctuation_penalty=18.0,
         )
     )
+
+
+def test_smooth_keying_runs_merges_multiple_adjacent_short_dropouts_without_skipping() -> None:
+    runs = [
+        DetectedRun("tone", 0.000, 0.060),
+        DetectedRun("gap", 0.060, 0.010),
+        DetectedRun("tone", 0.070, 0.060),
+        DetectedRun("gap", 0.130, 0.010),
+        DetectedRun("tone", 0.140, 0.060),
+        DetectedRun("gap", 0.200, 0.200),
+        DetectedRun("tone", 0.400, 0.060),
+    ]
+
+    smoothed = smooth_keying_runs(runs, merge_short_gaps_s=0.020)
+
+    assert smoothed == [
+        DetectedRun("tone", 0.000, 0.200),
+        DetectedRun("gap", 0.200, 0.200),
+        DetectedRun("tone", 0.400, 0.060),
+    ]
