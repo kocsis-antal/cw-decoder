@@ -31,6 +31,7 @@ class NextgenRun:
 @dataclass(frozen=True)
 class NextgenCandidate:
     carrier_hz: float
+    detector: str
     threshold_ratio: float
     threshold: float
     noise_floor: float
@@ -105,6 +106,12 @@ def decode_raw_file_nextgen(
     drop_short_tones_ms: float = 12.0,
     unit_candidate_spread: float = 0.12,
     unit_candidate_steps: int = 5,
+    soft_activity: bool = True,
+    soft_tone_on_probability: float = 0.56,
+    soft_tone_off_probability: float = 0.28,
+    soft_bridge_min_probability: float = 0.18,
+    soft_bridge_max_gap_ms: float = 90.0,
+    soft_bridge_gap_units: float = 1.6,
     adaptive_gap_thresholds: bool = True,
     element_letter_gap_units: float = 2.0,
     default_word_gap_units: float = 7.0,
@@ -151,6 +158,12 @@ def decode_raw_file_nextgen(
         min_tone_hz=min_tone_hz,
         max_tone_hz=max_tone_hz,
         threshold_ratios=threshold_ratios,
+        soft_activity=soft_activity,
+        soft_tone_on_probability=soft_tone_on_probability,
+        soft_tone_off_probability=soft_tone_off_probability,
+        soft_bridge_min_probability=soft_bridge_min_probability,
+        soft_bridge_max_gap_ms=soft_bridge_max_gap_ms,
+        soft_bridge_gap_units=soft_bridge_gap_units,
         adaptive_gap_thresholds=adaptive_gap_thresholds,
         element_letter_gap_units=element_letter_gap_units,
         default_word_gap_units=default_word_gap_units,
@@ -234,6 +247,17 @@ def decode_signal_carrier_nextgen(
                 config=config,
             )
         )
+    if config.soft_activity:
+        candidates.extend(
+            _decode_soft_energy_candidates(
+                energy,
+                frame_times,
+                carrier_hz=carrier_hz,
+                start_s=start_s,
+                session_gap_s=session_gap_s,
+                config=config,
+            )
+        )
     candidates = _unique_candidates(candidates)
     sessions = _group_candidates_into_sessions(
         candidates,
@@ -285,11 +309,11 @@ def format_decode_report(report: NextgenDecodeReport) -> str:
                 )
                 if not session.candidates:
                     continue
-                lines.append("             rank thr unit_ms wpm score conf evidence text")
+                lines.append("             rank det thr unit_ms wpm score conf evidence text")
                 for index, candidate in enumerate(session.candidates, start=1):
                     lines.append("             " + _format_candidate_row(index, candidate))
         elif carrier.candidates:
-            lines.append("      rank thr unit_ms wpm score conf evidence text")
+            lines.append("      rank det thr unit_ms wpm score conf evidence text")
             for index, candidate in enumerate(carrier.candidates, start=1):
                 lines.append("      " + _format_candidate_row(index, candidate))
     return "\n".join(lines)
@@ -300,7 +324,7 @@ def _format_candidate_row(index: int, candidate: NextgenCandidate) -> str:
     wpm = "-" if candidate.wpm is None else f"{candidate.wpm:5.1f}"
     score = "-" if candidate.quality_score is None else f"{candidate.quality_score:5.1f}"
     return (
-        f"{index:>4} {candidate.threshold_ratio:>4.2f} {unit_ms:>7} {wpm:>5} "
+        f"{index:>4} {candidate.detector[:4]:>4} {candidate.threshold_ratio:>4.2f} {unit_ms:>7} {wpm:>5} "
         f"{score:>5} {candidate.confidence:>4.2f} {candidate.evidence_score:>8.2f} "
         f"{candidate.text or '<none>'}"
     )
@@ -364,6 +388,162 @@ def _envelope_energy_frames(envelope: np.ndarray, sample_rate: int, *, hop_ms: f
     return energy, times
 
 
+def _decode_soft_energy_candidates(
+    energy: np.ndarray,
+    frame_times: np.ndarray,
+    *,
+    carrier_hz: float,
+    start_s: float,
+    session_gap_s: float,
+    config: StreamingConfig,
+) -> list[NextgenCandidate]:
+    """Decode a carrier using probability/hysteresis activity, not a hard threshold.
+
+    The hard-threshold candidates are still useful, but weak CW often fades
+    below one threshold for part of a dash.  This path keeps ambiguous frames in
+    the previous state and can bridge short, non-silent gaps inside tones when
+    the local envelope still carries some signal evidence.  It is deliberately
+    content-neutral: it only changes the timed tone/gap evidence that reaches
+    the Morse decoder.
+    """
+
+    if len(energy) == 0:
+        return []
+    noise_floor = float(np.percentile(energy, 15))
+    signal_floor = float(np.percentile(energy, 95))
+    if signal_floor <= noise_floor:
+        return []
+    probabilities = _activity_probability(energy, noise_floor, signal_floor)
+    active = _hysteresis_activity(
+        probabilities,
+        on_probability=config.soft_tone_on_probability,
+        off_probability=config.soft_tone_off_probability,
+    )
+    if not np.any(active):
+        return []
+
+    raw_runs = _runs_from_activity(active, config.hop_ms / 1000)
+    runs = [DetectedRun(run.kind, run.start_s + start_s, run.duration_s) for run in raw_runs]
+    runs = smooth_keying_runs(
+        runs,
+        merge_short_gaps_s=config.merge_short_gaps_ms / 1000,
+        drop_short_tones_s=config.drop_short_tones_ms / 1000,
+    )
+    runs = _bridge_soft_fade_gaps(runs, probabilities, frame_times, start_s, config)
+    runs = smooth_keying_runs(
+        runs,
+        merge_short_gaps_s=config.merge_short_gaps_ms / 1000,
+        drop_short_tones_s=config.drop_short_tones_ms / 1000,
+    )
+
+    decoded_candidates: list[NextgenCandidate] = []
+    threshold = noise_floor + (signal_floor - noise_floor) * config.soft_tone_on_probability
+    for segment_runs in _split_runs_into_segments(runs, session_gap_s=session_gap_s):
+        decoded_candidates.extend(
+            _decode_segment_candidates(
+                segment_runs,
+                probabilities,
+                frame_times,
+                carrier_hz=carrier_hz,
+                start_s=start_s,
+                threshold_ratio=config.soft_tone_on_probability,
+                detector="soft",
+                threshold=threshold,
+                noise_floor=noise_floor,
+                signal_floor=signal_floor,
+                duty_cycle=round(float(np.mean(active)), 6) if len(active) else 0.0,
+                config=config,
+            )
+        )
+    return decoded_candidates
+
+
+def _hysteresis_activity(
+    probabilities: np.ndarray,
+    *,
+    on_probability: float,
+    off_probability: float,
+) -> np.ndarray:
+    active = np.zeros(len(probabilities), dtype=bool)
+    state = False
+    for index, probability in enumerate(probabilities):
+        value = float(probability)
+        if state:
+            if value <= off_probability:
+                state = False
+        elif value >= on_probability:
+            state = True
+        active[index] = state
+    return active
+
+
+def _bridge_soft_fade_gaps(
+    runs: list[DetectedRun],
+    probabilities: np.ndarray,
+    frame_times: np.ndarray,
+    start_s: float,
+    config: StreamingConfig,
+) -> list[DetectedRun]:
+    if not runs or not any(run.kind == "gap" for run in runs):
+        return runs
+    try:
+        unit_s = _estimate_unit_from_runs(runs)
+    except ValueError:
+        unit_s = None
+    max_gap_s = config.soft_bridge_max_gap_ms / 1000
+    if unit_s is not None and config.soft_bridge_gap_units > 0:
+        max_gap_s = max(max_gap_s, unit_s * config.soft_bridge_gap_units)
+    if max_gap_s <= 0:
+        return runs
+
+    bridged: list[DetectedRun] = []
+    index = 0
+    while index < len(runs):
+        run = runs[index]
+        if (
+            run.kind == "gap"
+            and 0 < index < len(runs) - 1
+            and runs[index - 1].kind == "tone"
+            and runs[index + 1].kind == "tone"
+            and run.duration_s <= max_gap_s
+            and _mean_probability_for_run(run, probabilities, frame_times, start_s) >= config.soft_bridge_min_probability
+        ):
+            previous = bridged.pop()
+            next_run = runs[index + 1]
+            bridged.append(
+                DetectedRun(
+                    "tone",
+                    previous.start_s,
+                    previous.duration_s + run.duration_s + next_run.duration_s,
+                )
+            )
+            index += 2
+            continue
+        bridged.append(run)
+        index += 1
+    return bridged
+
+
+def _mean_probability_for_run(
+    run: DetectedRun,
+    probabilities: np.ndarray,
+    frame_times: np.ndarray,
+    start_s: float,
+) -> float:
+    if len(probabilities) == 0 or len(frame_times) == 0:
+        return 0.0
+    relative_start = run.start_s - start_s
+    relative_end = relative_start + run.duration_s
+    mask = (frame_times >= relative_start) & (frame_times < relative_end)
+    values = probabilities[mask]
+    if len(values) == 0:
+        center = relative_start + run.duration_s / 2
+        index = int(np.searchsorted(frame_times, center))
+        if 0 <= index < len(probabilities):
+            values = probabilities[index : index + 1]
+    return float(np.mean(values)) if len(values) else 0.0
+
+
 def _decode_energy_candidates(
     energy: np.ndarray,
     frame_times: np.ndarray,
@@ -398,6 +578,7 @@ def _decode_energy_candidates(
                 carrier_hz=carrier_hz,
                 start_s=start_s,
                 threshold_ratio=threshold_ratio,
+                detector="threshold",
                 threshold=threshold,
                 noise_floor=noise_floor,
                 signal_floor=signal_floor,
@@ -416,6 +597,7 @@ def _decode_segment_candidates(
     carrier_hz: float,
     start_s: float,
     threshold_ratio: float,
+    detector: str,
     threshold: float,
     noise_floor: float,
     signal_floor: float,
@@ -438,11 +620,17 @@ def _decode_segment_candidates(
         quality = score_decode_result(decoded)
         confidence = _mean_run_confidence(confidence_runs)
         evidence_score = _candidate_evidence_score(decoded, quality.score, confidence)
+        if detector == "soft":
+            # Soft/hysteresis candidates are valuable rescue hypotheses for fading
+            # tones, but they are deliberately conservative: a clean hard-threshold
+            # decode with comparable evidence should still win.
+            evidence_score -= 5.0
         segment_start = min((run.start_s for run in runs if run.kind == "tone"), default=runs[0].start_s)
         segment_end = max((run.start_s + run.duration_s for run in runs if run.kind == "tone"), default=runs[-1].start_s + runs[-1].duration_s)
         decoded_candidates.append(
             NextgenCandidate(
                 carrier_hz=round(float(carrier_hz), 3),
+                detector=detector,
                 threshold_ratio=round(float(threshold_ratio), 6),
                 threshold=float(threshold),
                 noise_floor=noise_floor,
@@ -635,7 +823,7 @@ def _candidate_evidence_score(decoded: DecodeResult, quality_score: float, confi
         + duration_bonus
         - unknowns * 2.0
         - punctuation * 0.6
-        - quality_score * 0.22
+        - quality_score * 0.45
     )
 
 

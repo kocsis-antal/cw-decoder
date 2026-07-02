@@ -26,6 +26,12 @@ def _add_streaming_options(parser: argparse.ArgumentParser) -> None:
         default="",
         help="Comma separated dynamic threshold candidates. Empty means use only --threshold-ratio.",
     )
+    parser.add_argument("--soft-activity", action=argparse.BooleanOptionalAction, default=True, help="Use nextgen probability/hysteresis tone-gate candidates in addition to hard thresholds")
+    parser.add_argument("--soft-tone-on-probability", type=float, default=0.56, help="Probability level where the soft tone gate turns on")
+    parser.add_argument("--soft-tone-off-probability", type=float, default=0.28, help="Probability level where the soft tone gate turns off")
+    parser.add_argument("--soft-bridge-min-probability", type=float, default=0.18, help="Minimum mean probability required to bridge a short fade gap inside a tone")
+    parser.add_argument("--soft-bridge-max-gap-ms", type=float, default=90.0, help="Maximum absolute gap length the soft gate may bridge inside a tone")
+    parser.add_argument("--soft-bridge-gap-units", type=float, default=1.6, help="Maximum gap length in estimated keying units the soft gate may bridge inside a tone")
     parser.add_argument("--adaptive-gap-thresholds", action=argparse.BooleanOptionalAction, default=True, help="Estimate letter/word gap boundary from session timing instead of using a fixed 5-unit split")
     parser.add_argument("--element-letter-gap-units", type=float, default=2.0, help="Boundary between intra-character and inter-character gaps, in estimated CW units")
     parser.add_argument("--default-word-gap-units", type=float, default=7.0, help="Fallback word-gap boundary when no distinct word-gap cluster is visible")
@@ -150,6 +156,12 @@ def _streaming_config(args: argparse.Namespace):
         bandwidth_hz=args.bandwidth_hz,
         threshold_ratio=args.threshold_ratio,
         threshold_ratios=_parse_float_csv(args.threshold_ratios),
+        soft_activity=args.soft_activity,
+        soft_tone_on_probability=args.soft_tone_on_probability,
+        soft_tone_off_probability=args.soft_tone_off_probability,
+        soft_bridge_min_probability=args.soft_bridge_min_probability,
+        soft_bridge_max_gap_ms=args.soft_bridge_max_gap_ms,
+        soft_bridge_gap_units=args.soft_bridge_gap_units,
         adaptive_gap_thresholds=args.adaptive_gap_thresholds,
         element_letter_gap_units=args.element_letter_gap_units,
         default_word_gap_units=args.default_word_gap_units,

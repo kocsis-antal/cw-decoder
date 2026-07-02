@@ -22,6 +22,12 @@ class StreamingConfig:
     bandwidth_hz: float = 40.0
     threshold_ratio: float = 0.35
     threshold_ratios: tuple[float, ...] = ()
+    soft_activity: bool = True
+    soft_tone_on_probability: float = 0.56
+    soft_tone_off_probability: float = 0.28
+    soft_bridge_min_probability: float = 0.18
+    soft_bridge_max_gap_ms: float = 90.0
+    soft_bridge_gap_units: float = 1.6
     adaptive_gap_thresholds: bool = True
     element_letter_gap_units: float = 2.0
     default_word_gap_units: float = 7.0
@@ -205,6 +211,14 @@ def validate_streaming_config(config: StreamingConfig) -> None:
     for threshold_ratio in config.threshold_ratios:
         if not 0 < threshold_ratio < 1:
             raise ValueError("threshold_ratios values must be in the (0, 1) range")
+    if not 0 < config.soft_tone_off_probability < config.soft_tone_on_probability < 1:
+        raise ValueError("soft tone probabilities must satisfy 0 < off < on < 1")
+    if not 0 <= config.soft_bridge_min_probability <= 1:
+        raise ValueError("soft_bridge_min_probability must be in the [0, 1] range")
+    if config.soft_bridge_max_gap_ms < 0:
+        raise ValueError("soft_bridge_max_gap_ms must not be negative")
+    if config.soft_bridge_gap_units < 0:
+        raise ValueError("soft_bridge_gap_units must not be negative")
     if config.element_letter_gap_units <= 0:
         raise ValueError("element_letter_gap_units must be positive")
     if config.default_word_gap_units <= config.element_letter_gap_units:

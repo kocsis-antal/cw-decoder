@@ -627,3 +627,20 @@ suppresses tiny low-evidence fragments. The raw defaults match the current live
 capture workflow: `--sample-rate 8000`, `--sample-format s16le`,
 `--max-tone-hz 3000`, dynamic threshold candidates and short dropout repair are
 all enabled without extra arguments.
+
+## Nextgen soft activity gate
+
+The carrier-centric nextgen decoder now adds a default soft activity path next to the hard threshold candidates.  It keeps a hysteresis tone state from the carrier envelope probability and can bridge short, non-silent fade gaps inside tones.  This is intended to rescue weak dash/dot fragments without adding any CQ/DE/callsign-specific bias.
+
+Useful tuning switches for live or replay experiments:
+
+```bash
+--no-soft-activity
+--soft-tone-on-probability 0.56
+--soft-tone-off-probability 0.28
+--soft-bridge-min-probability 0.18
+--soft-bridge-max-gap-ms 90
+--soft-bridge-gap-units 1.6
+```
+
+The soft path is enabled by default but carries a small candidate penalty, so a clean hard-threshold decode with comparable evidence wins.  Soft candidates are visible in `decode-raw` rank tables with `det=soft`.
