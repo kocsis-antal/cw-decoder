@@ -419,6 +419,11 @@ def _detect_carriers_from_spectrum(
     max_power = float(np.max(powers)) if len(powers) else 0.0
     if max_power <= 0:
         return ()
+
+    # Keep carrier detection deliberately simple and conservative: choose real
+    # accumulated spectral peaks.  The previous temporal/local-peak admission was
+    # too eager in live WebSDR audio and promoted sidebands/noise shadows to
+    # separate public carriers, which made the receiver look busy but less useful.
     candidates = _local_peak_indices(powers)
     candidates.sort(key=lambda index: float(powers[index]), reverse=True)
     selected: list[CarrierCandidate] = []

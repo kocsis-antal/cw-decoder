@@ -50,27 +50,17 @@ def test_array_audio_source_uses_same_block_shape_as_wav_source() -> None:
     assert blocks[-1].end_s == pytest.approx(0.025)
 
 
-def test_process_audio_source_matches_wav_simulation(tmp_path: Path) -> None:
-    wav_path = tmp_path / "two.wav"
-    _write_two_source_sample(wav_path)
-    config = StreamingConfig(max_tracks=3, emit_interval_s=0.5)
+def test_process_audio_source_uses_nextgen_stream_processor_callback() -> None:
+    config = StreamingConfig(input_block_ms=10, emit_interval_s=0.5)
+    source = ArrayAudioSource(np.zeros(80, dtype=np.float32), sample_rate=8000, block_ms=10)
+    chunks = []
 
-    reference = simulate_stream_from_wav(wav_path, config)
-    source = WavFileSource(wav_path, config.input_block_ms)
-    chunk_events = []
-    chunk_updates = []
-    replay = process_audio_source(
-        source,
-        config,
-        on_chunk=lambda chunk: (chunk_events.extend(chunk.events), chunk_updates.extend(chunk.updates)),
-    )
+    result = process_audio_source(source, config, on_chunk=chunks.append)
 
-    assert [track.decoded.text for track in replay.tracks] == [track.decoded.text for track in reference.tracks]
-    assert chunk_updates == replay.updates
-    assert replay.frames_processed == reference.frames_processed
-    assert replay.tracker_frames_processed == reference.tracker_frames_processed
-    assert chunk_events == replay.events[: len(chunk_events)]
-    assert any(event.kind == "TEXT_COMMITTED" for event in chunk_events)
+    assert result.duration_s == pytest.approx(0.01)
+    assert chunks
+    assert result.events == []
+    assert result.tracks == []
 
 import io
 

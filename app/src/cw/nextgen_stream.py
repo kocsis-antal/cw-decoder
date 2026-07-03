@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
 from cw.nextgen import NextgenCarrierResult, NextgenSession, _detect_carriers_nextgen, decode_signal_carrier_nextgen
-from cw.stream_models import StreamChunkResult, StreamEvent, StreamingConfig, channel_match_hz, effective_tracker_frame_ms, effective_tracker_hop_ms
+from cw.stream_models import StreamChunkResult, StreamEvent, StreamingConfig, channel_match_hz, effective_tracker_hop_ms
+from cw.live_layers import (
+    LiveCarrierDecoder as _LiveCarrierDecoder,
+    LiveCarrierDetector as _LiveCarrierDetector,
+    LiveSessionHypothesisArbiter as _LiveSessionHypothesisArbiter,
+)
 
 
 @dataclass
@@ -21,6 +26,13 @@ class _LiveSessionState:
     final_evidence: float | None = None
     last_observed_s: float = 0.0
     last_commit_s: float = 0.0
+    last_preview_text: str = ""
+    last_preview_score: float | None = None
+    last_preview_evidence: float | None = None
+    last_preview_s: float = -1.0e9
+    best_preview_text: str = ""
+    best_preview_score: float | None = None
+    best_preview_evidence: float | None = None
     pending_final_since_s: float | None = None
     finalized: bool = False
 
@@ -36,15 +48,20 @@ class _LiveChannelState:
     next_session_id: int = 1
     sessions: list[_LiveSessionState] = field(default_factory=list)
     dormant: bool = False
+    last_symbol_hmm_s: float = -1.0e9
+    last_activity_event_s: float = -1.0e9
 
 
 class NextgenStreamProcessor:
     """Incremental JSON-event streamer backed by the carrier-centric decoder.
 
-    This is intentionally a thin live layer over ``cw.nextgen``: carrier
-    detection and text decoding use the same signal-domain path as ``decode-raw``.
-    The live layer only buffers audio, periodically re-decodes the retained
-    window, and turns timed nextgen sessions into stable stream events.
+    This is intentionally a live layer over ``cw.nextgen`` rather than a
+    second decoder.  Carrier demodulation and text candidates use the same
+    signal-domain primitives as ``decode-raw``, but the live path is not a
+    long batch re-decode loop: it decodes a short recent window and keeps
+    committed transcript state across windows.  That lets simultaneous/late
+    carriers show up quickly instead of being masked by the strongest signal
+    in a long rolling history.
     """
 
     def __init__(self, sample_rate: int, config: StreamingConfig) -> None:
@@ -66,6 +83,9 @@ class NextgenStreamProcessor:
         self._events: list[StreamEvent] = []
         self._channels: list[_LiveChannelState] = []
         self._next_channel_id = 1
+        self._carrier_detector = _LiveCarrierDetector(self.sample_rate, self.config)
+        self._carrier_decoder = _LiveCarrierDecoder(self.sample_rate, self.config)
+        self._hypothesis_arbiter = _LiveSessionHypothesisArbiter()
 
     def push(self, samples: np.ndarray) -> StreamChunkResult:
         samples = np.asarray(samples, dtype=np.float32)
@@ -125,56 +145,60 @@ class NextgenStreamProcessor:
         )
 
     def _decode_and_emit(self, *, final: bool) -> None:
-        signal, signal_start_s = self._decode_window()
-        if len(signal) < max(1, int(self.sample_rate * 0.20)):
+        # Use two separate time scales.  Carrier detection must be short and
+        # responsive so a second station can appear immediately.  Text decoding
+        # needs a longer per-carrier window, otherwise common live fragments like
+        # "CQ CQ DE ..." are seen only as unstable scraps and never settle.
+        detect_signal, _detect_start_s = self._recent_window(self.config.live_carrier_window_s)
+        if len(detect_signal) < max(1, int(self.sample_rate * 0.20)):
             return
-        detected = _detect_carriers_nextgen(
-            signal,
-            self.sample_rate,
-            min_tone_hz=self.config.min_tone_hz,
-            max_tone_hz=self.config.max_tone_hz,
-            max_carriers=self.config.max_tracks,
-            min_separation_hz=self.config.min_separation_hz,
-            relative_threshold=self.config.peak_relative_threshold,
-            frame_ms=effective_tracker_frame_ms(self.config),
-            hop_ms=effective_tracker_hop_ms(self.config),
-        )
-        if not detected:
+        detected_carrier_hz = self._carrier_detector.detect(detect_signal)
+        if not detected_carrier_hz:
             self._finalize_inactive_channels()
             return
 
         seen_channels: set[int] = set()
-        for detected_carrier in detected:
-            carrier_hz = float(detected_carrier.carrier_hz)
+        for carrier_hz in detected_carrier_hz:
             channel = self._channel_for_carrier(carrier_hz)
             seen_channels.add(channel.channel_id)
             if channel.hits < self.config.min_track_hits:
                 continue
-            result = decode_signal_carrier_nextgen(
-                signal,
-                self.sample_rate,
-                carrier_hz=carrier_hz,
-                start_s=signal_start_s,
-                threshold_ratios=self.config.threshold_ratios or (self.config.threshold_ratio,),
-                lowpass_ms=max(5.0, self.config.frame_ms / 2.5),
-                envelope_hop_ms=self.config.hop_ms,
-                session_gap_s=self.config.min_session_gap_s,
-                min_session_evidence_score=0.0,
-                config=self.config,
-                max_candidates=self.config.max_tracks,
-                max_candidates_per_session=4,
+            decode_signal, decode_start_s = self._channel_decode_window(channel)
+            if len(decode_signal) < max(1, int(self.sample_rate * 0.20)):
+                continue
+            decode_config = self._config_for_channel_decode(channel, final=final)
+            result = self._carrier_decoder.decode(
+                decode_signal,
+                start_s=decode_start_s,
+                carrier_hz=channel.carrier_hz,
+                decode_config=decode_config,
             )
             self._publish_carrier_result(channel, result, final=final)
 
         self._finalize_inactive_channels(seen_channel_ids=seen_channels)
 
+    def _config_for_channel_decode(self, channel: _LiveChannelState, *, final: bool) -> StreamingConfig:
+        # Live viewing needs a low-latency receiver, not an expensive offline
+        # re-interpreter.  The symbol HMM is useful for batch/rescue decoding,
+        # but repeatedly running it on every rolling live window causes latency,
+        # flicker, and long stalls.  Keep it opt-in for the live processor.
+        if not self.config.symbol_hmm_decoding or not self.config.live_symbol_hmm_decoding:
+            return replace(self.config, symbol_hmm_decoding=False)
+        interval_s = self.config.symbol_hmm_live_interval_s
+        run_hmm = final or interval_s <= 0 or self.processed_duration_s - channel.last_symbol_hmm_s >= interval_s
+        if run_hmm:
+            channel.last_symbol_hmm_s = self.processed_duration_s
+            return self.config
+        return replace(self.config, symbol_hmm_decoding=False)
+
 
     def _decode_window(self) -> tuple[np.ndarray, float]:
-        # The carrier-centric decoder is intentionally richer than the old STFT
-        # path, but repeatedly decoding an ever-growing live buffer would be
-        # quadratic.  Decode a recent rolling window and keep the state machine
-        # responsible for carrying session ids and finalization forward.
-        target_s = 12.0
+        # Backwards-compatible helper used by tests and callers that want the
+        # text-decode window.  Carrier detection now has its own shorter window.
+        return self._recent_window(self.config.live_decode_window_s)
+
+    def _recent_window(self, target_s: float) -> tuple[np.ndarray, float]:
+        target_s = float(target_s)
         if self.config.max_history_s is not None:
             target_s = min(target_s, float(self.config.max_history_s))
         max_samples = max(1, int(round(target_s * self.sample_rate)))
@@ -182,39 +206,79 @@ class NextgenStreamProcessor:
             return self._window, self._window_start_s
         return self._window[-max_samples:], self._window_start_s + (len(self._window) - max_samples) / self.sample_rate
 
+    def _channel_decode_window(self, channel: _LiveChannelState) -> tuple[np.ndarray, float]:
+        # Start near the carrier's first public appearance when possible, but
+        # cap the amount of audio decoded per tick.  This gives the decoder
+        # enough context for calls/CQ phrases while the carrier detector remains
+        # short-windowed.
+        earliest_start_s = max(self._window_start_s, channel.first_seen_s - self.config.history_margin_s)
+        latest_start_s = self.processed_duration_s - self.config.live_decode_window_s
+        start_s = max(earliest_start_s, latest_start_s)
+        if start_s <= self._window_start_s:
+            return self._window, self._window_start_s
+        start_index = int(round((start_s - self._window_start_s) * self.sample_rate))
+        start_index = min(max(0, start_index), len(self._window))
+        return self._window[start_index:].copy(), self._window_start_s + start_index / self.sample_rate
+
     def _publish_carrier_result(self, channel: _LiveChannelState, result: NextgenCarrierResult, *, final: bool) -> None:
         channel.carrier_hz = _smooth_carrier(channel.carrier_hz, result.carrier_hz, self.config.carrier_smoothing)
         channel.last_seen_s = self.processed_duration_s
+        events_before = len(self._events)
+        decoded_any_session = False
         for decoded_session in result.sessions:
-            if not decoded_session.text or not self._session_passes_publish_filters(decoded_session):
+            if not decoded_session.text:
+                continue
+            decoded_any_session = True
+            prelim_stable_publishable = self._session_passes_publish_filters(decoded_session)
+            prelim_preview_publishable = self._session_passes_preview_filters(decoded_session)
+            if not prelim_stable_publishable and not prelim_preview_publishable:
                 continue
             session = self._session_for_decoded(channel, decoded_session)
             if session is None or session.finalized:
+                continue
+            decoded_session = self._hypothesis_arbiter.choose(decoded_session, session)
+            stable_publishable = self._session_passes_publish_filters(decoded_session)
+            preview_publishable = self._session_passes_preview_filters(decoded_session)
+            if not stable_publishable and not preview_publishable:
                 continue
             previous_end_s = session.end_s
             session.end_s = max(session.end_s, decoded_session.end_s)
             session.last_observed_s = self.processed_duration_s
             score = decoded_session.best.quality_score if decoded_session.best is not None else None
-            self._remember_final_candidate(session, decoded_session, score)
-            text_to_emit = self._text_to_commit(session, decoded_session.text, score)
-            if text_to_emit is not None:
-                self._events.append(
-                    StreamEvent(
-                        time_s=self.processed_duration_s,
-                        kind="TEXT_COMMITTED",
-                        channel_id=channel.channel_id,
-                        session_id=session.session_id,
-                        carrier_hz=channel.carrier_hz,
-                        text=text_to_emit,
-                        score=score,
+
+            if stable_publishable:
+                self._remember_best_preview(session, decoded_session.text, score)
+                self._remember_final_candidate(session, decoded_session, score)
+                text_to_emit = self._text_to_commit(session, decoded_session.text, score)
+                if text_to_emit is not None:
+                    self._events.append(
+                        StreamEvent(
+                            time_s=self.processed_duration_s,
+                            kind="TEXT_COMMITTED",
+                            channel_id=channel.channel_id,
+                            session_id=session.session_id,
+                            carrier_hz=channel.carrier_hz,
+                            text=text_to_emit,
+                            score=score,
+                        )
                     )
-                )
-            if session.end_s > previous_end_s + max(0.05, self.config.hop_ms / 1000 * 4):
-                session.pending_final_since_s = None
-            if final:
-                self._emit_session_final(channel, session, reason=self.config.final_event_reason)
-            elif decoded_session.end_s <= self.processed_duration_s - self.config.finalization_delay_s:
-                self._maybe_emit_pending_final(channel, session)
+                elif self.config.preview_updates:
+                    self._maybe_emit_text_preview(channel, session, decoded_session.text, score, reason="awaiting_stable_prefix")
+                if session.end_s > previous_end_s + max(0.05, self.config.hop_ms / 1000 * 4):
+                    session.pending_final_since_s = None
+                if final:
+                    self._emit_session_final(channel, session, reason=self.config.final_event_reason)
+                elif decoded_session.end_s <= self.processed_duration_s - self.config.finalization_delay_s:
+                    self._maybe_emit_pending_final(channel, session)
+            elif self.config.preview_updates:
+                self._maybe_emit_text_preview(channel, session, decoded_session.text, score, reason="below_commit_threshold")
+
+        if len(self._events) == events_before:
+            self._maybe_emit_signal_active(
+                channel,
+                result,
+                reason="awaiting_decodable_text" if decoded_any_session else "carrier_detected",
+            )
 
 
     def _finalize_inactive_channels(self, *, seen_channel_ids: set[int] | None = None) -> None:
@@ -249,6 +313,101 @@ class NextgenStreamProcessor:
             # single noisy hit just because its historical hit count was high.
             channel.hits = 0
 
+
+    def _maybe_emit_signal_active(self, channel: _LiveChannelState, result: NextgenCarrierResult, *, reason: str) -> None:
+        if not channel.channel_started or channel.dormant:
+            return
+        interval_s = self.config.signal_activity_interval_s
+        if interval_s <= 0:
+            return
+        if self.processed_duration_s - channel.last_activity_event_s < interval_s:
+            return
+        channel.last_activity_event_s = self.processed_duration_s
+        self._events.append(
+            StreamEvent(
+                time_s=self.processed_duration_s,
+                kind="SIGNAL_ACTIVE",
+                channel_id=channel.channel_id,
+                session_id=None,
+                carrier_hz=channel.carrier_hz,
+                text="",
+                score=result.best.quality_score if result.best is not None else None,
+                reason=reason,
+            )
+        )
+
+    def _maybe_emit_text_preview(
+        self,
+        channel: _LiveChannelState,
+        session: _LiveSessionState,
+        text: str,
+        score: float | None,
+        *,
+        reason: str,
+    ) -> None:
+        preview_text = text.strip()
+        if not preview_text:
+            return
+        if preview_text == session.last_preview_text and self.processed_duration_s - session.last_preview_s < self.config.preview_interval_s:
+            return
+        if session.committed_text and preview_text == session.committed_text:
+            return
+        if self.processed_duration_s - session.last_preview_s < self.config.preview_interval_s:
+            # Allow immediate correction from an empty/noisy state only if the
+            # text grew materially; otherwise previews would become the old
+            # flickering live updates under a different event name.
+            if _compact_len(preview_text) <= _compact_len(session.last_preview_text) + 2:
+                return
+        session.last_preview_text = preview_text
+        session.last_preview_score = score
+        session.last_preview_evidence = _text_evidence(preview_text, score)
+        session.last_preview_s = self.processed_duration_s
+        self._remember_best_preview(session, preview_text, score)
+        self._events.append(
+            StreamEvent(
+                time_s=self.processed_duration_s,
+                kind="TEXT_PREVIEW",
+                channel_id=channel.channel_id,
+                session_id=session.session_id,
+                carrier_hz=channel.carrier_hz,
+                text=preview_text,
+                score=score,
+                reason=reason,
+            )
+        )
+
+    def _session_passes_preview_filters(self, decoded: NextgenSession) -> bool:
+        if not self.config.preview_updates:
+            return False
+        text = decoded.text or ""
+        compact = "".join(char for char in text if not char.isspace())
+        known_chars = sum(1 for char in compact if char != "?")
+        if len(compact) < self.config.preview_min_chars:
+            return False
+        if known_chars < max(1, self.config.preview_min_chars):
+            return False
+        candidate = decoded.best
+        if candidate is None:
+            return True
+        if self.config.preview_max_score is not None and candidate.quality_score is not None:
+            if candidate.quality_score > self.config.preview_max_score:
+                return False
+        if self.config.reject_et_only_sessions and len(compact) >= self.config.et_only_min_chars:
+            if set(compact) <= {"E", "T"}:
+                return False
+        if self.config.min_keying_unit_s and candidate.unit_s is not None and candidate.unit_s < self.config.min_keying_unit_s:
+            return False
+        if self.config.max_keying_unit_s is not None and candidate.unit_s is not None and candidate.unit_s > self.config.max_keying_unit_s:
+            return False
+        tone_runs = [run for run in candidate.runs if run.kind == "tone"]
+        if len(tone_runs) < max(1, min(self.config.min_keying_tone_runs, 2)):
+            return False
+        active_duration_s = sum(run.duration_s for run in tone_runs)
+        if active_duration_s < min(0.05, self.config.min_keying_active_duration_s or 0.05):
+            return False
+        if self.config.max_keying_duty_cycle is not None and candidate.duty_cycle > self.config.max_keying_duty_cycle:
+            return False
+        return True
 
     def _session_passes_publish_filters(self, decoded: NextgenSession) -> bool:
         candidate = decoded.best
@@ -399,6 +558,29 @@ class NextgenStreamProcessor:
         session.final_score = score
         session.final_evidence = evidence
 
+    def _remember_best_preview(self, session: _LiveSessionState, text: str, score: float | None) -> None:
+        text = text.strip()
+        if not text:
+            return
+        evidence = _text_evidence(text, score)
+        if not session.best_preview_text:
+            session.best_preview_text = text
+            session.best_preview_score = score
+            session.best_preview_evidence = evidence
+            return
+        current_evidence = session.best_preview_evidence if session.best_preview_evidence is not None else _text_evidence(session.best_preview_text, session.best_preview_score)
+        if _candidate_is_better_live_memory(
+            current_text=session.best_preview_text,
+            current_score=session.best_preview_score,
+            current_evidence=current_evidence,
+            new_text=text,
+            new_score=score,
+            new_evidence=evidence,
+        ):
+            session.best_preview_text = text
+            session.best_preview_score = score
+            session.best_preview_evidence = evidence
+
     def _maybe_emit_pending_final(self, channel: _LiveChannelState, session: _LiveSessionState) -> None:
         if session.finalized:
             return
@@ -479,6 +661,13 @@ class NextgenStreamProcessor:
             min_overlap_chars=self.config.live_progress_min_overlap_chars,
         )
         if stitched is None:
+            stitched = _stitch_rolling_text_with_leading_skip(
+                committed_text,
+                current_text.strip(),
+                min_overlap_chars=max(3, self.config.live_progress_min_overlap_chars),
+                max_skip_chars=2,
+            )
+        if stitched is None:
             return None
         if _compact_len(stitched) <= _compact_len(committed_text):
             return None
@@ -490,20 +679,76 @@ class NextgenStreamProcessor:
     def _final_text_for(self, session: _LiveSessionState) -> tuple[str, float | None]:
         final_text = session.final_text.strip()
         committed_text = session.committed_text.strip()
+        preview_text = (session.last_preview_text or session.best_preview_text).strip()
+        best_preview_text = session.best_preview_text.strip()
+
+        # Live reception has a different failure mode than offline decoding:
+        # the operator may briefly see the correct interpretation as a preview,
+        # then the final rolling-window hypothesis over-explains the trailing
+        # silence/fade and replaces it with a shorter or incompatible text.  Do
+        # not treat SESSION_FINAL as an oracle; it is just another hypothesis.
+        final_text, final_score = _protect_live_candidate_on_final(
+            committed_text=committed_text,
+            final_text=final_text,
+            final_score=session.final_score,
+            preview_text=preview_text,
+            preview_score=session.last_preview_score if preview_text == session.last_preview_text.strip() else session.best_preview_score,
+            best_preview_text=best_preview_text,
+            best_preview_score=session.best_preview_score,
+        )
+
+        if committed_text and preview_text:
+            stitched_preview = _stitch_rolling_text_with_leading_skip(
+                committed_text,
+                preview_text,
+                min_overlap_chars=max(3, self.config.live_progress_min_overlap_chars),
+                max_skip_chars=2,
+            )
+            if stitched_preview is not None and _compact_len(stitched_preview) > max(_compact_len(committed_text), _compact_len(final_text)):
+                preview_score = session.last_preview_score if preview_text == session.last_preview_text.strip() else session.best_preview_score
+                if _score_not_much_worse(preview_score, final_score, margin=14.0):
+                    return stitched_preview, preview_score
+        if committed_text and best_preview_text and best_preview_text != preview_text:
+            stitched_preview = _stitch_rolling_text_with_leading_skip(
+                committed_text,
+                best_preview_text,
+                min_overlap_chars=max(3, self.config.live_progress_min_overlap_chars),
+                max_skip_chars=2,
+            )
+            if stitched_preview is not None and _compact_len(stitched_preview) > max(_compact_len(committed_text), _compact_len(final_text)):
+                if _score_not_much_worse(session.best_preview_score, final_score, margin=14.0):
+                    return stitched_preview, session.best_preview_score
+
         if not committed_text:
-            return final_text, session.final_score
+            return final_text, final_score
         if not final_text:
             return committed_text, session.committed_score
         if _texts_are_compatible(committed_text, final_text):
-            return final_text, session.final_score
-        if session.committed_score is not None and session.final_score is not None:
+            return final_text, final_score
+        stitched = _stitch_rolling_text(
+            committed_text,
+            final_text,
+            min_overlap_chars=max(2, self.config.live_progress_min_overlap_chars),
+        )
+        if stitched is not None and _compact_len(stitched) > _compact_len(committed_text):
+            return stitched, final_score
+        if session.committed_score is not None and final_score is not None:
+            final_evidence = session.final_evidence if session.final_evidence is not None else _text_evidence(final_text, final_score)
+            committed_evidence = _text_evidence(committed_text, session.committed_score)
+            final_len = _compact_len(final_text)
+            committed_len = _compact_len(committed_text)
+            final_not_much_worse = final_score <= session.committed_score + self.config.final_text_regression_margin
+            if final_len >= committed_len and final_evidence >= committed_evidence + 5.0 and final_not_much_worse:
+                return final_text, final_score
+            if final_len >= committed_len + 4 and final_score <= session.committed_score + 3.0:
+                return final_text, final_score
             # The final rolling-window decode may choose a different threshold/unit
             # hypothesis after the signal has ended.  Avoid replacing a stable
             # live prefix with an incompatible final text unless the final
             # hypothesis is materially better.  Lower quality scores are better.
-            if session.final_score >= session.committed_score - self.config.final_text_regression_margin:
+            if final_score >= session.committed_score - self.config.final_text_regression_margin:
                 return committed_text, session.committed_score
-        return final_text, session.final_score
+        return final_text, final_score
 
     def _prune_window_if_needed(self) -> None:
         max_history_s = self.config.max_history_s
@@ -545,6 +790,47 @@ def _stitch_rolling_text(previous: str, current: str, *, min_overlap_chars: int)
             return None
         separator = "" if previous.endswith((" ", "/")) or suffix.startswith((" ", "/")) else " "
         return f"{previous}{separator}{suffix}".strip()
+    return None
+
+
+def _stitch_rolling_text_with_leading_skip(
+    previous: str,
+    current: str,
+    *,
+    min_overlap_chars: int,
+    max_skip_chars: int,
+) -> str | None:
+    """Stitch a rolling decode that starts a few characters before/after sync.
+
+    A short live window often catches the tail of the already committed word
+    with one bad/missing leading character, e.g. committed ``HA7VY`` and preview
+    ``T7VY 5NN``.  Exact suffix-prefix overlap cannot join those, but dropping
+    the stray leading ``T`` reveals the real overlap ``7VY``.  Limit this to a
+    tiny leading skip so unrelated new traffic is not glued together.
+    """
+
+    if not previous or not current:
+        return None
+    previous_compact, _previous_map = _compact_with_index_map(previous)
+    current_compact, current_map = _compact_with_index_map(current)
+    if not previous_compact or not current_compact:
+        return None
+    max_skip = min(max(0, max_skip_chars), max(0, len(current_compact) - min_overlap_chars))
+    for skip in range(1, max_skip + 1):
+        remaining = current_compact[skip:]
+        max_overlap = min(len(previous_compact), len(remaining))
+        for overlap in range(max_overlap, min_overlap_chars - 1, -1):
+            if previous_compact[-overlap:] != remaining[:overlap]:
+                continue
+            append_compact_index = skip + overlap
+            if append_compact_index >= len(current_map):
+                return None
+            append_start = current_map[append_compact_index - 1] + 1
+            suffix = current[append_start:].lstrip()
+            if not suffix:
+                return None
+            separator = "" if previous.endswith(" ") or suffix.startswith(" ") else " "
+            return f"{previous}{separator}{suffix}".strip()
     return None
 
 
@@ -616,6 +902,110 @@ def _text_evidence(text: str, score: float | None) -> float:
     return known_chars * 1.8 - unknowns * 2.0 - score_penalty
 
 
+def _protect_live_candidate_on_final(
+    *,
+    committed_text: str,
+    final_text: str,
+    final_score: float | None,
+    preview_text: str,
+    preview_score: float | None,
+    best_preview_text: str,
+    best_preview_score: float | None,
+) -> tuple[str, float | None]:
+    """Choose a final text without throwing away a better live hypothesis.
+
+    The final decode is still derived from the same rolling batch window as the
+    preview.  It is not more authoritative; it merely happened later.  Prefer a
+    recent/best live candidate when the final text is shorter, incompatible with
+    already committed text, or loses a plausible suffix that was visible live.
+    """
+
+    protected_text = preview_text or best_preview_text
+    protected_score = preview_score if preview_text else best_preview_score
+    if best_preview_text:
+        best_evidence = _text_evidence(best_preview_text, best_preview_score)
+        protected_evidence = _text_evidence(protected_text, protected_score) if protected_text else -1e9
+        if best_evidence > protected_evidence + 2.0:
+            protected_text = best_preview_text
+            protected_score = best_preview_score
+    protected_text = protected_text.strip()
+    final_text = final_text.strip()
+    if not protected_text:
+        return final_text, final_score
+    if not final_text:
+        return protected_text, protected_score
+    if final_text == protected_text:
+        return final_text, final_score
+
+    final_len = _compact_len(final_text)
+    protected_len = _compact_len(protected_text)
+    compatible = _texts_are_compatible(final_text, protected_text)
+    common = _compact_common_prefix_len(final_text, protected_text)
+    min_len = max(1, min(final_len, protected_len))
+    strong_shared_prefix = common >= 4 and common / min_len >= 0.70
+
+    if compatible:
+        if protected_len > final_len:
+            # Example: preview shows "EQS 5NN", final settles on "R1BQS 5".
+            # If the longer live candidate is not materially worse, do not lose
+            # the suffix the operator already saw.
+            if _score_not_much_worse(protected_score, final_score, margin=12.0):
+                return protected_text, protected_score
+        return final_text, final_score
+
+    if committed_text:
+        # Never let an incompatible final hypothesis replace a committed prefix
+        # unless it is clearly better.  This is the core live hysteresis.
+        if _texts_are_compatible(committed_text, protected_text) or _stitch_rolling_text(committed_text, protected_text, min_overlap_chars=2):
+            if protected_len >= final_len - 1 and _score_not_much_worse(protected_score, final_score, margin=14.0):
+                return protected_text, protected_score
+        if not _texts_are_compatible(committed_text, final_text) and final_len <= protected_len + 2:
+            if _score_not_much_worse(protected_score, final_score, margin=18.0):
+                return protected_text, protected_score
+
+    if protected_len >= final_len + 2 and _score_not_much_worse(protected_score, final_score, margin=10.0):
+        return protected_text, protected_score
+    if strong_shared_prefix and protected_len > final_len and _score_not_much_worse(protected_score, final_score, margin=12.0):
+        return protected_text, protected_score
+    return final_text, final_score
+
+
+def _score_not_much_worse(candidate_score: float | None, reference_score: float | None, *, margin: float) -> bool:
+    if candidate_score is None or reference_score is None:
+        return True
+    return candidate_score <= reference_score + margin
+
+
+def _candidate_is_better_live_memory(
+    *,
+    current_text: str,
+    current_score: float | None,
+    current_evidence: float,
+    new_text: str,
+    new_score: float | None,
+    new_evidence: float,
+) -> bool:
+    if not current_text:
+        return True
+    if new_text == current_text:
+        return new_score is not None and (current_score is None or new_score < current_score)
+    if _texts_are_compatible(current_text, new_text):
+        if _compact_len(new_text) >= _compact_len(current_text):
+            return _score_not_much_worse(new_score, current_score, margin=8.0)
+        return False
+    common = _compact_common_prefix_len(current_text, new_text)
+    min_len = max(1, min(_compact_len(current_text), _compact_len(new_text)))
+    if common >= 4 and common / min_len >= 0.70 and _compact_len(new_text) >= _compact_len(current_text):
+        return _score_not_much_worse(new_score, current_score, margin=8.0)
+    # Otherwise keep a candidate only if it is materially stronger, not merely
+    # longer.  This prevents late chaotic rolling decodes from becoming memory.
+    if new_evidence >= current_evidence + 8.0 and _score_not_much_worse(new_score, current_score, margin=3.0):
+        return True
+    if new_score is not None and current_score is not None and new_score + 12.0 < current_score:
+        return True
+    return False
+
+
 def _candidate_is_better_final(
     *,
     current_text: str,
@@ -654,7 +1044,18 @@ def _candidate_is_better_final(
             return True
     # Incompatible late rolling-window candidates are common in live decoding.
     # Keep the earlier/better final candidate unless the new hypothesis brings
-    # materially stronger signal evidence or a much better timing score.
+    # materially stronger signal evidence, a much better timing score, or a
+    # substantially longer explanation that is not worse by score.  The latter
+    # protects live startup: early rolling windows can decode a short wrong
+    # fragment before the full call/text is visible.
+    if new_compact_len >= current_compact_len + 4:
+        if new_score is not None and current_score is not None and new_score <= current_score + 3.0:
+            return True
+        if new_evidence >= current_evidence + 2.0:
+            return True
+    if new_score is not None and current_score is not None:
+        if new_evidence >= current_evidence + 3.0 and new_score <= current_score + 3.0:
+            return True
     if new_evidence >= current_evidence + 8.0:
         return True
     if new_score is not None and current_score is not None and new_score + 12.0 < current_score:

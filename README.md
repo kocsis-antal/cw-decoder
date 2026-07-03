@@ -218,14 +218,25 @@ For debugging the raw, unstable candidates, use:
 docker compose -f infra/compose.yml run --rm cw python -m cw.cli stream-sim samples/generated/two_sources.wav --raw-updates
 ```
 
-Print channel/session lifecycle events for humans:
+By default, non-JSON streaming commands render the live human dashboard: one
+row per carrier frequency, current state, and a rolling transcript of what
+has been decoded on that carrier so far. Session/gap fragments are separated with extra whitespace, not with a
+transmitted-looking CW character; the currently unstable preview suffix is
+shown in square brackets, for example `CQ EV81OB EV81OB K   CQ [EV8]`. Decoded transcript rows stay
+visible for a while even after the carrier goes dormant. The transcript is bounded for long monitoring sessions, but the dashboard now uses terminal width when available and a generous fallback otherwise; set `CW_VIEW_COLUMNS` or pass `COLUMNS` through Docker if you want an explicit width. Internal channel/session ids stay in
+the event model but are not shown. No extra flag is needed:
 
 ```bash
-docker compose -f infra/compose.yml run --rm cw python -m cw.cli stream-sim samples/generated/two_sources.wav --events
+docker compose -f infra/compose.yml run --rm cw python -m cw.cli stream-sim samples/generated/two_sources.wav
 ```
 
-Print the same lifecycle events as JSON Lines for tools, GUI prototypes, or
-future websocket adapters:
+For the old verbose lifecycle log, use `--human-view events` or the backwards
+compatible `--events` / `--human-events` alias. `--human-view compact` is kept
+as an alias for the dashboard. To suppress live human output and keep only the
+final decoded summary, use `--human-view off` or `--no-human-events`.
+
+Print lifecycle events as JSON Lines for tools, GUI prototypes, or future
+websocket adapters:
 
 ```bash
 docker compose -f infra/compose.yml run --rm cw python -m cw.cli stream-sim samples/generated/two_sources.wav --json-events
@@ -303,6 +314,38 @@ chunks are processed, and only final end-of-stream events are flushed at EOF.
 The same `AudioSource` interface is intended for later microphone, SDR, or
 network audio adapters.
 
+
+### Live receiver architecture
+
+The live path is deliberately layered.  `NextgenStreamProcessor` is now mainly
+an orchestrator; the operational pieces live behind small independent layers:
+
+```text
+raw PCM blocks
+  -> short-window carrier detector
+  -> channel tracker / reacquisition
+  -> per-carrier decode window
+  -> multi-hypothesis Morse candidate generators
+  -> live hypothesis arbiter
+  -> JSON events / dashboard renderer
+```
+
+The carrier detector uses a short window so new or weaker parallel stations can
+appear quickly.  The per-carrier text decoder uses a longer window, because
+phrases such as `CQ CQ DE ...` need more context than a carrier detector does.
+Those two windows are controlled separately with `--live-carrier-window-s` and
+`--live-decode-window-s`.  The default retained audio history is capped at
+12 seconds; transcript state carries the already committed text, not an
+unbounded audio buffer.
+
+Candidate ranking is also split from signal detection.  Offline reports still
+keep all generated candidates, but live output passes each session through a
+live hypothesis arbiter.  The arbiter compares the parallel threshold/Viterbi/HMM
+candidates and prefers a cleaner timing/text hypothesis when the evidence is
+essentially tied, instead of blindly accepting the highest raw evidence score.
+This avoids cases where a visibly good `CQ CQ ...` candidate is replaced by a
+slightly higher-evidence but worse-looking alternative.
+
 ### Raw PCM stdin / virtual microphone input
 
 `stream-stdin` reads raw mono or interleaved PCM from standard input and feeds it
@@ -320,7 +363,6 @@ ffmpeg -hide_banner -loglevel error -i app/samples/generated/qso.wav -f s16le -a
 | docker compose -f infra/compose.yml run --rm -T cw python -m cw.cli stream-stdin \
     --sample-rate 8000 \
     --sample-format s16le \
-    --json-events \
     --prune-committed-active-sessions
 ```
 
@@ -344,17 +386,19 @@ ffmpeg -hide_banner -loglevel error \
 | docker compose -f infra/compose.yml run --rm -T cw python -m cw.cli stream-stdin \
     --sample-rate 8000 \
     --sample-format s16le \
-    --json-events \
     --prune-committed-active-sessions \
     --live-stats-interval-s 5
 ```
 
-`--json-events` prints only real decoder events. If the squelch/keying gate is
-holding everything back, stdout may stay quiet even though audio is being read;
-`--live-stats-interval-s` prints progress to stderr without polluting JSONL. It
-also prints `rms_dbfs` and `peak_dbfs`, which are useful for spotting muted or
-very low-level monitor audio. A very quiet stream, for example below roughly
-`-45 dBFS`, is worth turning up before tuning decoder thresholds.
+Without `--json-events`, live input renders the human dashboard: one row per
+carrier frequency, the current state, and a rolling transcript of what has
+been decoded on that carrier so far. Gap-separated transcript fragments use extra whitespace rather than a transmitted-looking separator; unstable preview text is bracketed, so Morse punctuation such as `/` and `?` remains unambiguous. Internal channel/session ids are kept in the
+event model but hidden from this view. With
+`--json-events`, stdout is pure JSONL for servers, logging, future web viewers,
+or deep debugging. `--live-stats-interval-s` prints progress to stderr without
+polluting JSONL; it also prints `rms_dbfs` and `peak_dbfs`, which are useful for
+spotting muted or very low-level monitor audio. A very quiet stream, for example
+below roughly `-45 dBFS`, is worth turning up before tuning decoder thresholds.
 
 For general live SDR work, avoid tuning the decoder to one hard-coded audio
 pitch range unless the capture is intentionally about one fixed station. Moving
@@ -377,7 +421,6 @@ parec -d cw_sdr.monitor --format=s16le --rate=8000 --channels=1 \
 | docker compose -f infra/compose.yml run --rm -T cw python -m cw.cli stream-stdin \
     --sample-rate 8000 \
     --sample-format s16le \
-    --json-events \
     --prune-committed-active-sessions \
     --live-stats-interval-s 5
 ```
@@ -465,7 +508,6 @@ you want Ctrl+C to exit immediately:
 ... | docker compose -f infra/compose.yml run --rm -T cw python -m cw.cli stream-stdin \
     --sample-rate 8000 \
     --sample-format s16le \
-    --json-events \
     --no-finalize-on-interrupt
 ```
 
@@ -505,7 +547,6 @@ docker compose -f infra/compose.yml run --rm cw \
   python -m cw.cli stream-raw-file samples/live/${ts}.s16le \
     --sample-rate 8000 \
     --sample-format s16le \
-    --json-events \
     --prune-committed-active-sessions
 ```
 
@@ -522,35 +563,53 @@ example `app\samples\generated\qso.wav`; inside the container the same file is
 `/app/samples/generated/qso.wav`. A VB-CABLE/WebSDR command looks like this:
 
 ```cmd
-ffmpeg -hide_banner -loglevel error -f dshow -i audio="CABLE Output (VB-Audio Virtual Cable)" -f s16le -ac 1 -ar 8000 - | docker compose -f infra\compose.yml run --rm -T cw python -m cw.cli stream-stdin --sample-rate 8000 --sample-format s16le --json-events --prune-committed-active-sessions --live-stats-interval-s 5
+ffmpeg -hide_banner -loglevel error -f dshow -i audio="CABLE Output (VB-Audio Virtual Cable)" -f s16le -ac 1 -ar 8000 - | docker compose -f infra\compose.yml run --rm -T cw python -m cw.cli stream-stdin --sample-rate 8000 --sample-format s16le --prune-committed-active-sessions --live-stats-interval-s 5
 ```
 
 PowerShell can still be used as a launcher by wrapping the whole binary pipe in
 `cmd /d /c "..."`, but the pipe itself should stay inside `cmd.exe`.
 
+For a human-readable console view, simply omit `--json-events`; that is the
+default live dashboard. If another process needs the raw event stream, keep
+JSONL and pipe it into the same dashboard viewer:
+
+```bash
+python -m cw.cli stream-stdin --sample-rate 8000 --sample-format s16le --json-events \
+| python -m cw.cli view-events
+```
+
+Saved JSONL can be viewed the same way:
+
+```bash
+python -m cw.cli view-events samples/live/20260703-104548.events.jsonl
+```
+
+Use `--human-events` only for the old verbose lifecycle log with channel/session
+debug details.
+
 
 ### Streaming core layout
 
-The streaming code is split into a few focused modules:
+The live path now has one main engine: a low-latency carrier-centric nextgen streamer.
+The older STFT live processor and its dedicated tracker/state modules were
+removed from the public runtime so replay, stdin, and tests exercise the same
+logic. Live processing uses a short rolling decode window (`--live-decode-window-s`, default 3 s) and keeps the accumulated transcript in stream state, instead of repeatedly treating the last 12 seconds as a fresh batch decode.
 
 ```text
-stream_models.py  public stream dataclasses and configuration validation
-stream_stft.py    incremental overlapping STFT over a continuous sample stream
-stream_decode.py  carrier/session decoding helpers from retained FFT frames
-stream_tracker.py frame-by-frame spectral peak tracking, SNR squelch, carrier tracks
-stream_keying.py CW-like keying gate before public channel/session events
-stream_state.py   mutable ChannelState/SessionState lifecycle, commit bookkeeping, active prune anchors, stale-history suppression
+nextgen.py        carrier demodulation, lattice/Symbol-HMM candidates, session decoding
+nextgen_stream.py low-latency live channel/session state machine around the nextgen decoder
+stream_models.py  stream dataclasses and configuration validation
 stream_events.py  stable JSON/JSONL serialization for stream events
-stream_sources.py block-based WAV/array/raw-PCM audio sources for replay and live input
-stream_processor.py stateful push/finish live processor and pruning orchestration
-streaming.py      compatibility/public API re-exports
+stream_sources.py block-based WAV/array/raw-PCM audio sources for replay/live input
+stream_decode.py  shared Morse timing helpers still used by diagnostics and nextgen candidates
+streaming.py      small public facade around NextgenStreamProcessor and audio sources
+event_view.py     human-readable rendering for JSONL stream events
 ```
 
-
-The tracker keeps smoothed carrier estimates, marks tracks dormant after `--max-track-gap-s`, rejects per-frame peaks below `--min-peak-snr-db`, and filters long-term weak sidebands/noise through `--track-relative-threshold`. Peak separation, frame-to-frame track matching, and channel-level merging are separate configuration knobs, so experiments can distinguish "two spectral peaks", "same drifting carrier track", and "same GUI/logical channel". The mutable live state is explicit: `ChannelState` is the long-lived carrier/GUI anchor, while `SessionState` owns the current transmission's committed prefix, active prune boundary, and start/final bookkeeping. Decoded tempo/unit values still come from each `StreamSessionResult`, so a later reply on the same channel starts with a clean session-level timing estimate instead of inheriting the previous operator's tempo.
-
-`cw.streaming` still re-exports the public stream API, so existing imports such
-as `from cw.streaming import StreamingConfig, StreamingSTFT` continue to work.
+The intended architecture is now explicit: carrier detection and text decoding
+live in `nextgen.py`; live concerns such as short-window decoding, stable commits, previews, progress
+updates, and channel dormancy live in `nextgen_stream.py`; source handling and
+wire-format rendering are separate.
 
 ## Contest-QSO scenario
 
@@ -594,7 +653,7 @@ Unlike the streaming STFT decoder, it demodulates each carrier separately:
 
 ```text
 raw PCM -> carrier detection -> per-carrier baseband mix -> low-pass envelope
-        -> confidence-bearing tone/gap runs -> unit candidates -> decoded text
+        -> symbol-HMM / Viterbi / threshold candidates -> session text
 ```
 
 It is deliberately content-neutral.  It does not reward `CQ`, `DE`, callsigns,
@@ -628,19 +687,80 @@ capture workflow: `--sample-rate 8000`, `--sample-format s16le`,
 `--max-tone-hz 3000`, dynamic threshold candidates and short dropout repair are
 all enabled without extra arguments.
 
-## Nextgen soft activity gate
+## Direct Symbol-HMM decoder
 
-The carrier-centric nextgen decoder now adds a default soft activity path next to the hard threshold candidates.  It keeps a hysteresis tone state from the carrier envelope probability and can bridge short, non-silent fade gaps inside tones.  This is intended to rescue weak dash/dot fragments without adding any CQ/DE/callsign-specific bias.
+The nextgen path now includes a direct, duration-aware Symbol-HMM candidate path.
+Unlike the threshold, activity-Viterbi, and timing-lattice layers, this decoder
+does not start from a pre-cut tone/gap run list.  It searches the carrier
+envelope probability frames directly for Morse duration states: dit tone, dah
+tone, element gap, letter gap, and word gap.  A small beam keeps alternative
+state paths alive until the session candidate is scored.
+
+This path is used by the same `decode-raw`, `stream-stdin`, `stream-raw-file`,
+and `stream-sim` code paths; it is not tied to a file/offline source.  The
+direct dit/dah/gap Symbol-HMM now participates as a normal candidate source.
+It also runs a second unit pass derived from its own best duration path, so a
+rolling window or mixed-speed capture is not locked to one initial WPM guess.
+When the direct candidates are still weak, an additional complete-character
+Morse template beam (`char-hmm`, displayed as `det=hmm`) can try valid Morse
+character duration templates directly against the probability frames.  It
+remains content-neutral: no `CQ`, `DE`, callsign, Q-code, `5NN`, or `73` bonus
+exists anywhere in the scoring.
+
+Diagnostic switches:
+
+```bash
+--no-symbol-hmm-decoding
+--symbol-hmm-beam-width 16
+--symbol-hmm-max-candidates 3
+--symbol-hmm-unit-spread 0.18
+--symbol-hmm-unit-steps 3
+--symbol-hmm-transition-penalty 0.18
+```
+
+In human `decode-raw` output, direct Symbol-HMM rows show as `det=hmm`.
+
+## Nextgen Viterbi activity decoder
+
+The carrier-centric nextgen decoder now has a default two-state Viterbi activity path next to the hard threshold candidates.  It treats each carrier envelope frame as probabilistic evidence for either `tone` or `gap`, then chooses the most likely whole-window state path with a transition penalty.  A brief fade inside a dash can stay tone if two extra tone/gap transitions would be less likely than the weak frames; a real silent Morse gap is still preserved when the accumulated silence evidence wins.
+
+This replaces the previous one-way hysteresis decision as the default soft path.  It is still content-neutral: no `CQ`, `DE`, callsign, Q-code, `5NN`, or `73` bonus is used.
 
 Useful tuning switches for live or replay experiments:
 
 ```bash
 --no-soft-activity
---soft-tone-on-probability 0.56
---soft-tone-off-probability 0.28
+--viterbi-transition-penalty 1.15
 --soft-bridge-min-probability 0.18
 --soft-bridge-max-gap-ms 90
 --soft-bridge-gap-units 1.6
 ```
 
-The soft path is enabled by default but carries a small candidate penalty, so a clean hard-threshold decode with comparable evidence wins.  Soft candidates are visible in `decode-raw` rank tables with `det=soft`.
+The Viterbi path is enabled by default but carries a small candidate penalty, so a clean hard-threshold decode with comparable evidence still wins.  Viterbi candidates are visible in `decode-raw` rank tables with `det=vit`.
+
+## Nextgen timing lattice / beam decoder
+
+After the threshold and Viterbi activity gates produce candidate tone/gap runs, the
+nextgen decoder keeps a small timing lattice alive around Morse boundary
+cases.  A run that sits close to the dot/dash boundary can be interpreted as
+both `.` and `-`; a gap close to an element/letter or letter/word split can keep
+both neighbouring interpretations until the whole token sequence is scored.
+
+This is still content-neutral: there is no `CQ`, `DE`, callsign, Q-code, `5NN`,
+or `73` bonus.  The beam score uses only timing distance, unknown/punctuation
+penalties, envelope confidence, and amount of decoded signal evidence.  Word gaps
+that survive the timing lattice get a small generic evidence reward because they
+come from received spacing, not from QSO semantics.
+
+It is enabled by default in `decode-raw`, `stream-stdin`, `stream-raw-file`, and
+`stream-sim`.  Diagnostic switches:
+
+```bash
+--no-lattice-decoding
+--lattice-beam-width 12
+--lattice-max-candidates 3
+--lattice-tone-margin-units 0.45
+--lattice-gap-margin-units 0.60
+```
+
+In human `decode-raw` output, lattice-derived rows show as `det=lat`, hard threshold rows as `det=thr`, Viterbi activity rows as `det=vit`, and direct Symbol-HMM rows as `det=hmm`.

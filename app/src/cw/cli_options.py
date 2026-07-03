@@ -15,8 +15,10 @@ def _add_streaming_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--hop-ms", type=float, default=5.0)
     parser.add_argument("--tracker-frame-ms", type=float, default=None)
     parser.add_argument("--tracker-hop-ms", type=float, default=None)
-    parser.add_argument("--max-history-s", type=float, default=None, help="Hard cap for retained decode frame history; prevents unbounded live memory/CPU growth")
+    parser.add_argument("--max-history-s", type=float, default=12.0, help="Hard cap for retained live audio history; defaults to 12 s so streaming CPU/memory do not grow unbounded")
     parser.add_argument("--max-idle-history-s", type=float, default=None, help="Shorter retained-history cap before any channel/session has been recognized")
+    parser.add_argument("--live-carrier-window-s", type=float, default=2.0, help="Short recent audio window used only for live carrier detection/tracking")
+    parser.add_argument("--live-decode-window-s", type=float, default=8.0, help="Recent per-carrier audio window decoded for live text; carrier tracking remains short-windowed")
     parser.add_argument("--min-tone-hz", type=float, default=200.0)
     parser.add_argument("--max-tone-hz", type=float, default=3000.0)
     parser.add_argument("--bandwidth-hz", type=float, default=40.0)
@@ -26,19 +28,34 @@ def _add_streaming_options(parser: argparse.ArgumentParser) -> None:
         default="",
         help="Comma separated dynamic threshold candidates. Empty means use only --threshold-ratio.",
     )
-    parser.add_argument("--soft-activity", action=argparse.BooleanOptionalAction, default=True, help="Use nextgen probability/hysteresis tone-gate candidates in addition to hard thresholds")
+    parser.add_argument("--soft-activity", action=argparse.BooleanOptionalAction, default=True, help="Use nextgen Viterbi probability tone/gap candidates in addition to hard thresholds")
     parser.add_argument("--soft-tone-on-probability", type=float, default=0.56, help="Probability level where the soft tone gate turns on")
     parser.add_argument("--soft-tone-off-probability", type=float, default=0.28, help="Probability level where the soft tone gate turns off")
     parser.add_argument("--soft-bridge-min-probability", type=float, default=0.18, help="Minimum mean probability required to bridge a short fade gap inside a tone")
     parser.add_argument("--soft-bridge-max-gap-ms", type=float, default=90.0, help="Maximum absolute gap length the soft gate may bridge inside a tone")
     parser.add_argument("--soft-bridge-gap-units", type=float, default=1.6, help="Maximum gap length in estimated keying units the soft gate may bridge inside a tone")
+    parser.add_argument("--viterbi-transition-penalty", type=float, default=1.15, help="Penalty for tone/gap state changes in the probability Viterbi activity decoder")
+    parser.add_argument("--symbol-hmm-decoding", action=argparse.BooleanOptionalAction, default=True, help="Decode directly from carrier activity probabilities with a duration-HMM/beam symbol model")
+    parser.add_argument("--symbol-hmm-beam-width", type=int, default=16, help="Maximum states retained by the direct symbol-HMM decoder")
+    parser.add_argument("--symbol-hmm-max-candidates", type=int, default=3, help="Maximum direct symbol-HMM alternatives generated per session range")
+    parser.add_argument("--symbol-hmm-unit-spread", type=float, default=0.18, help="Relative unit-time spread searched by the direct symbol-HMM decoder")
+    parser.add_argument("--symbol-hmm-unit-steps", type=int, default=3, help="Number of unit-time hypotheses tried by the direct symbol-HMM decoder")
+    parser.add_argument("--symbol-hmm-transition-penalty", type=float, default=0.18, help="Penalty for adding each tone/gap duration transition in the direct symbol-HMM decoder")
+    parser.add_argument("--symbol-hmm-min-unit-s", type=float, default=0.025, help="Minimum dit unit accepted by the direct symbol-HMM decoder")
+    parser.add_argument("--symbol-hmm-max-unit-s", type=float, default=0.250, help="Maximum dit unit accepted by the direct symbol-HMM decoder")
+    parser.add_argument("--symbol-hmm-live-interval-s", type=float, default=2.0, help="Run the expensive direct symbol-HMM live path at most this often per carrier; 0 means every decode tick")
+    parser.add_argument("--lattice-decoding", action=argparse.BooleanOptionalAction, default=True, help="Keep alternate dot/dash and gap interpretations alive near timing boundaries")
+    parser.add_argument("--lattice-beam-width", type=int, default=12, help="Maximum number of timing interpretation states retained by the lattice decoder")
+    parser.add_argument("--lattice-max-candidates", type=int, default=3, help="Maximum lattice alternatives generated per unit hypothesis")
+    parser.add_argument("--lattice-tone-margin-units", type=float, default=0.45, help="Allow both dot and dash when tone length is this close to the 2-unit boundary")
+    parser.add_argument("--lattice-gap-margin-units", type=float, default=0.60, help="Allow neighbouring gap classes when gap length is this close to a boundary")
     parser.add_argument("--adaptive-gap-thresholds", action=argparse.BooleanOptionalAction, default=True, help="Estimate letter/word gap boundary from session timing instead of using a fixed 5-unit split")
     parser.add_argument("--element-letter-gap-units", type=float, default=2.0, help="Boundary between intra-character and inter-character gaps, in estimated CW units")
     parser.add_argument("--default-word-gap-units", type=float, default=7.0, help="Fallback word-gap boundary when no distinct word-gap cluster is visible")
     parser.add_argument("--gap-cluster-min-ratio", type=float, default=1.45, help="Minimum multiplicative separation required to split letter and word gap clusters")
     parser.add_argument("--gap-cluster-min-delta-units", type=float, default=1.0, help="Minimum absolute gap separation in CW units required for a letter/word split")
     parser.add_argument("--gap-cluster-min-lower-count", type=int, default=2, help="Require at least this many shorter inter-letter candidates before creating a word-gap cluster")
-    parser.add_argument("--peak-relative-threshold", type=float, default=0.25)
+    parser.add_argument("--peak-relative-threshold", type=float, default=0.05)
     parser.add_argument("--track-relative-threshold", type=float, default=0.10)
     parser.add_argument("--min-peak-snr-db", type=float, default=0.0, help="Require each carrier peak to rise this many dB above the per-frame spectral floor")
     parser.add_argument("--min-keying-tone-runs", type=int, default=0, help="Require this many tone runs before a carrier/session is published")
@@ -70,7 +87,12 @@ def _add_streaming_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--emit-interval-s", type=float, default=0.50)
     parser.add_argument("--min-update-score", type=float, default=25.0)
     parser.add_argument("--min-live-commit-chars", type=int, default=2, help="Minimum stable non-space characters before emitting a live TEXT_COMMITTED update")
-    parser.add_argument("--live-progress-interval-s", type=float, default=4.0, help="Emit a best-effort active-session progress update after this many seconds without a stable prefix commit")
+    parser.add_argument("--preview-updates", action=argparse.BooleanOptionalAction, default=True, help="Emit best-effort TEXT_PREVIEW events for active CW before the text is stable enough to commit")
+    parser.add_argument("--preview-interval-s", type=float, default=0.75, help="Minimum seconds between TEXT_PREVIEW events for one live session")
+    parser.add_argument("--preview-min-chars", type=int, default=1, help="Minimum non-space characters before emitting a TEXT_PREVIEW update")
+    parser.add_argument("--preview-max-score", type=float, default=80.0, help="Reject TEXT_PREVIEW candidates with a worse quality score; use a negative value to disable")
+    parser.add_argument("--signal-activity-interval-s", type=float, default=2.0, help="Emit SIGNAL_ACTIVE heartbeat events for confirmed carriers that have no decodable text yet")
+    parser.add_argument("--live-progress-interval-s", type=float, default=1.25, help="Emit a best-effort active-session progress update after this many seconds without a stable prefix commit")
     parser.add_argument("--live-progress-min-overlap-chars", type=int, default=3, help="Minimum compact text overlap required when stitching rolling-window live progress updates")
     parser.add_argument("--final-text-regression-margin", type=float, default=10.0, help="Use the last stable live text when final re-decode is this many score points worse")
     parser.add_argument("--max-final-score", type=float, default=30.0)
@@ -86,7 +108,27 @@ def _add_streaming_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--prune-committed-active-sessions", action="store_true")
     parser.add_argument("--raw-updates", action="store_true")
     parser.add_argument("--updates", type=int, default=20)
-    parser.add_argument("--events", action="store_true", help="Print channel/session lifecycle events")
+    parser.add_argument(
+        "--human-view",
+        choices=["dashboard", "compact", "events", "off"],
+        default="dashboard",
+        help="Human live output mode used when --json-events is not set. dashboard is the default; compact is kept as an alias; events is the old verbose lifecycle log; off prints only the final decoded summary.",
+    )
+    parser.add_argument(
+        "--events",
+        "--human-events",
+        dest="human_view",
+        action="store_const",
+        const="events",
+        help="Print the old verbose human-readable channel/session lifecycle events",
+    )
+    parser.add_argument(
+        "--no-human-events",
+        dest="human_view",
+        action="store_const",
+        const="off",
+        help="Suppress live human events and print only the final summary",
+    )
     parser.add_argument(
         "--json-events",
         action="store_true",
@@ -151,6 +193,8 @@ def _streaming_config(args: argparse.Namespace):
         tracker_hop_ms=args.tracker_hop_ms,
         max_history_s=args.max_history_s,
         max_idle_history_s=args.max_idle_history_s,
+        live_carrier_window_s=args.live_carrier_window_s,
+        live_decode_window_s=args.live_decode_window_s,
         min_tone_hz=args.min_tone_hz,
         max_tone_hz=args.max_tone_hz,
         bandwidth_hz=args.bandwidth_hz,
@@ -162,6 +206,21 @@ def _streaming_config(args: argparse.Namespace):
         soft_bridge_min_probability=args.soft_bridge_min_probability,
         soft_bridge_max_gap_ms=args.soft_bridge_max_gap_ms,
         soft_bridge_gap_units=args.soft_bridge_gap_units,
+        viterbi_transition_penalty=args.viterbi_transition_penalty,
+        symbol_hmm_decoding=args.symbol_hmm_decoding,
+        symbol_hmm_beam_width=args.symbol_hmm_beam_width,
+        symbol_hmm_max_candidates=args.symbol_hmm_max_candidates,
+        symbol_hmm_unit_spread=args.symbol_hmm_unit_spread,
+        symbol_hmm_unit_steps=args.symbol_hmm_unit_steps,
+        symbol_hmm_transition_penalty=args.symbol_hmm_transition_penalty,
+        symbol_hmm_min_unit_s=args.symbol_hmm_min_unit_s,
+        symbol_hmm_max_unit_s=args.symbol_hmm_max_unit_s,
+        symbol_hmm_live_interval_s=args.symbol_hmm_live_interval_s,
+        lattice_decoding=args.lattice_decoding,
+        lattice_beam_width=args.lattice_beam_width,
+        lattice_max_candidates=args.lattice_max_candidates,
+        lattice_tone_margin_units=args.lattice_tone_margin_units,
+        lattice_gap_margin_units=args.lattice_gap_margin_units,
         adaptive_gap_thresholds=args.adaptive_gap_thresholds,
         element_letter_gap_units=args.element_letter_gap_units,
         default_word_gap_units=args.default_word_gap_units,
@@ -201,6 +260,11 @@ def _streaming_config(args: argparse.Namespace):
         stable_updates=not args.raw_updates,
         min_update_score=args.min_update_score,
         min_live_commit_chars=args.min_live_commit_chars,
+        preview_updates=args.preview_updates,
+        preview_interval_s=args.preview_interval_s,
+        preview_min_chars=args.preview_min_chars,
+        preview_max_score=None if args.preview_max_score is not None and args.preview_max_score < 0 else args.preview_max_score,
+        signal_activity_interval_s=args.signal_activity_interval_s,
         live_progress_interval_s=args.live_progress_interval_s,
         live_progress_min_overlap_chars=args.live_progress_min_overlap_chars,
         final_text_regression_margin=args.final_text_regression_margin,

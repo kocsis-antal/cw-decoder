@@ -15,8 +15,11 @@ class StreamingConfig:
     hop_ms: float = 5.0
     tracker_frame_ms: float | None = None
     tracker_hop_ms: float | None = None
-    max_history_s: float | None = None
+    max_history_s: float | None = 12.0
     max_idle_history_s: float | None = None
+    live_carrier_window_s: float = 2.0
+    live_decode_window_s: float = 8.0
+    live_symbol_hmm_decoding: bool = False
     min_tone_hz: float = 200.0
     max_tone_hz: float = 3000.0
     bandwidth_hz: float = 40.0
@@ -28,13 +31,28 @@ class StreamingConfig:
     soft_bridge_min_probability: float = 0.18
     soft_bridge_max_gap_ms: float = 90.0
     soft_bridge_gap_units: float = 1.6
+    viterbi_transition_penalty: float = 1.15
+    symbol_hmm_decoding: bool = True
+    symbol_hmm_beam_width: int = 16
+    symbol_hmm_max_candidates: int = 3
+    symbol_hmm_unit_spread: float = 0.18
+    symbol_hmm_unit_steps: int = 3
+    symbol_hmm_transition_penalty: float = 0.18
+    symbol_hmm_min_unit_s: float = 0.025
+    symbol_hmm_max_unit_s: float = 0.250
+    symbol_hmm_live_interval_s: float = 2.0
+    lattice_decoding: bool = True
+    lattice_beam_width: int = 12
+    lattice_max_candidates: int = 3
+    lattice_tone_margin_units: float = 0.45
+    lattice_gap_margin_units: float = 0.60
     adaptive_gap_thresholds: bool = True
     element_letter_gap_units: float = 2.0
     default_word_gap_units: float = 7.0
     gap_cluster_min_ratio: float = 1.45
     gap_cluster_min_delta_units: float = 1.0
     gap_cluster_min_lower_count: int = 2
-    peak_relative_threshold: float = 0.25
+    peak_relative_threshold: float = 0.05
     track_relative_threshold: float = 0.10
     min_peak_snr_db: float = 0.0
     min_keying_tone_runs: int = 0
@@ -67,7 +85,12 @@ class StreamingConfig:
     stable_updates: bool = True
     min_update_score: float = 25.0
     min_live_commit_chars: int = 2
-    live_progress_interval_s: float = 4.0
+    preview_updates: bool = True
+    preview_interval_s: float = 0.75
+    preview_min_chars: int = 1
+    preview_max_score: float | None = 80.0
+    signal_activity_interval_s: float = 2.0
+    live_progress_interval_s: float = 1.25
     live_progress_min_overlap_chars: int = 3
     final_text_regression_margin: float = 10.0
     max_final_score: float | None = 30.0
@@ -202,6 +225,10 @@ def validate_streaming_config(config: StreamingConfig) -> None:
         raise ValueError("max_history_s must be positive when set")
     if config.max_idle_history_s is not None and config.max_idle_history_s <= 0:
         raise ValueError("max_idle_history_s must be positive when set")
+    if config.live_carrier_window_s <= 0:
+        raise ValueError("live_carrier_window_s must be positive")
+    if config.live_decode_window_s <= 0:
+        raise ValueError("live_decode_window_s must be positive")
     if config.min_tone_hz >= config.max_tone_hz:
         raise ValueError("min_tone_hz must be lower than max_tone_hz")
     if config.bandwidth_hz <= 0:
@@ -219,6 +246,32 @@ def validate_streaming_config(config: StreamingConfig) -> None:
         raise ValueError("soft_bridge_max_gap_ms must not be negative")
     if config.soft_bridge_gap_units < 0:
         raise ValueError("soft_bridge_gap_units must not be negative")
+    if config.viterbi_transition_penalty < 0:
+        raise ValueError("viterbi_transition_penalty must not be negative")
+    if config.symbol_hmm_beam_width < 1:
+        raise ValueError("symbol_hmm_beam_width must be positive")
+    if config.symbol_hmm_max_candidates < 0:
+        raise ValueError("symbol_hmm_max_candidates must not be negative")
+    if config.symbol_hmm_unit_spread < 0:
+        raise ValueError("symbol_hmm_unit_spread must not be negative")
+    if config.symbol_hmm_unit_steps < 1:
+        raise ValueError("symbol_hmm_unit_steps must be positive")
+    if config.symbol_hmm_transition_penalty < 0:
+        raise ValueError("symbol_hmm_transition_penalty must not be negative")
+    if config.symbol_hmm_min_unit_s <= 0:
+        raise ValueError("symbol_hmm_min_unit_s must be positive")
+    if config.symbol_hmm_max_unit_s <= config.symbol_hmm_min_unit_s:
+        raise ValueError("symbol_hmm_max_unit_s must be greater than symbol_hmm_min_unit_s")
+    if config.symbol_hmm_live_interval_s < 0:
+        raise ValueError("symbol_hmm_live_interval_s must not be negative")
+    if config.lattice_beam_width < 1:
+        raise ValueError("lattice_beam_width must be positive")
+    if config.lattice_max_candidates < 0:
+        raise ValueError("lattice_max_candidates must not be negative")
+    if config.lattice_tone_margin_units < 0:
+        raise ValueError("lattice_tone_margin_units must not be negative")
+    if config.lattice_gap_margin_units < 0:
+        raise ValueError("lattice_gap_margin_units must not be negative")
     if config.element_letter_gap_units <= 0:
         raise ValueError("element_letter_gap_units must be positive")
     if config.default_word_gap_units <= config.element_letter_gap_units:
@@ -239,6 +292,12 @@ def validate_streaming_config(config: StreamingConfig) -> None:
         raise ValueError("min_keying_tone_runs must not be negative")
     if config.min_live_commit_chars < 1:
         raise ValueError("min_live_commit_chars must be positive")
+    if config.preview_interval_s < 0:
+        raise ValueError("preview_interval_s must not be negative")
+    if config.preview_min_chars < 0:
+        raise ValueError("preview_min_chars must not be negative")
+    if config.signal_activity_interval_s < 0:
+        raise ValueError("signal_activity_interval_s must not be negative")
     if config.live_progress_interval_s <= 0:
         raise ValueError("live_progress_interval_s must be positive")
     if config.live_progress_min_overlap_chars < 1:

@@ -71,3 +71,32 @@ def test_analyze_raw_cli_json(tmp_path: Path) -> None:
     assert payload["carriers"][0]["carrier_hz"] == 650.0
     assert payload["carriers"][0]["analyses"][0]["threshold_ratio"] == 0.35
     assert "TEST" in payload["carriers"][0]["analyses"][0]["text"]
+
+
+def test_accumulated_carrier_detection_can_use_low_threshold_for_weaker_peak() -> None:
+    from cw.prob_analysis import _detect_carriers_from_spectrum
+
+    freqs = np.arange(0, 3000, 10, dtype=np.float32)
+    spectrum = np.ones((100, len(freqs)), dtype=np.float32)
+    strong_index = int(np.argmin(np.abs(freqs - 700.0)))
+    weak_index = int(np.argmin(np.abs(freqs - 1500.0)))
+
+    # Loud station dominates the full rolling window.  A weaker station is still
+    # recoverable when the operator-facing live profile uses a low accumulated
+    # peak threshold, without promoting arbitrary one-frame temporal peaks.
+    spectrum[:80, strong_index] = 1000.0
+    spectrum[70:100, weak_index] = 600.0
+
+    detected = _detect_carriers_from_spectrum(
+        spectrum,
+        freqs,
+        min_tone_hz=200.0,
+        max_tone_hz=2500.0,
+        max_carriers=4,
+        min_separation_hz=80.0,
+        relative_threshold=0.05,
+    )
+
+    carriers = [round(candidate.carrier_hz) for candidate in detected]
+    assert 700 in carriers
+    assert 1500 in carriers

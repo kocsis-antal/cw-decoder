@@ -22,6 +22,23 @@ def _print_stream_json_events(source, config, args) -> None:
 
 
 def _run_live_human_stream(source, config, args) -> StreamChunkResult | None:
+    human_view = _human_view(args)
+    if human_view in {"dashboard", "compact"}:
+        from cw.event_view import HumanDashboardRenderer
+
+        renderer = HumanDashboardRenderer(sys.stdout)
+        renderer.start()
+        try:
+            return _run_nextgen_stream(
+                source,
+                config,
+                args,
+                json_events=False,
+                event_sink=renderer.emit,
+                tick_sink=renderer.tick,
+            )
+        finally:
+            renderer.close()
     return _run_nextgen_stream(source, config, args, json_events=False)
 
 
@@ -32,6 +49,7 @@ def _run_nextgen_stream(
     *,
     json_events: bool,
     event_sink: Callable[[StreamEvent], None] | None = None,
+    tick_sink: Callable[[float], None] | None = None,
 ) -> StreamChunkResult:
     from cw.nextgen_stream import NextgenStreamProcessor
 
@@ -48,9 +66,11 @@ def _run_nextgen_stream(
             if event_sink is not None:
                 for event in chunk.events:
                     event_sink(event)
-            elif not json_events and args.events:
+            elif not json_events and _human_view(args) == "events":
                 for event in chunk.events:
                     print(_format_event_line(event), flush=True)
+            if tick_sink is not None:
+                tick_sink(processor.processed_duration_s)
             last_stats_s = _maybe_print_live_stats(args, processor, len(all_events), last_stats_s)
     except KeyboardInterrupt:
         interrupted = True
@@ -85,7 +105,7 @@ def _run_nextgen_stream(
     if event_sink is not None:
         for event in new_events:
             event_sink(event)
-    elif not json_events and args.events:
+    elif not json_events and _human_view(args) == "events":
         for event in new_events:
             print(_format_event_line(event), flush=True)
     return StreamChunkResult(
@@ -132,6 +152,22 @@ def _dbfs(value: float) -> float:
 
 
 def _print_stream_summary(result: StreamChunkResult, args) -> None:
+    finals = [event for event in result.events if event.kind == "SESSION_FINAL" and event.text]
+    human_view = _human_view(args)
+    if human_view == "dashboard":
+        # The dashboard itself is the operator-facing transcript.  Printing a
+        # second decoded list after stream shutdown makes Ctrl+C output noisy
+        # and duplicates information already visible in the table.
+        return
+    if human_view != "events":
+        print("decoded:")
+        if not finals:
+            print("  <none>")
+            return
+        for event in finals:
+            print(f"  {event.carrier_hz:7.1f} Hz  {event.text}")
+        return
+
     print(f"duration_s={result.time_s:.3f}")
     print(
         f"frames_processed={result.frames_processed} "
@@ -140,7 +176,6 @@ def _print_stream_summary(result: StreamChunkResult, args) -> None:
         f"pruned_frames={result.pruned_frames}"
     )
     print(f"events={len(result.events)}")
-    finals = [event for event in result.events if event.kind == "SESSION_FINAL" and event.text]
     print(f"final_sessions={len(finals)}")
     print("final:")
     print("channel session carrier_hz score reason text")
@@ -154,10 +189,13 @@ def _print_stream_summary(result: StreamChunkResult, args) -> None:
             f"{event.reason:<13} "
             f"{event.text}"
         )
-    if args.events:
-        by_kind: dict[str, int] = defaultdict(int)
-        for event in result.events:
-            by_kind[event.kind] += 1
-        print("event_counts:")
-        for kind in sorted(by_kind):
-            print(f"  {kind}={by_kind[kind]}")
+    by_kind: dict[str, int] = defaultdict(int)
+    for event in result.events:
+        by_kind[event.kind] += 1
+    print("event_counts:")
+    for kind in sorted(by_kind):
+        print(f"  {kind}={by_kind[kind]}")
+
+def _human_view(args) -> str:
+    value = str(getattr(args, "human_view", "dashboard") or "dashboard")
+    return "dashboard" if value == "compact" else value

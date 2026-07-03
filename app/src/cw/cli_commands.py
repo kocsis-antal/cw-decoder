@@ -462,6 +462,21 @@ def run_cli_command(args) -> None:
             soft_bridge_min_probability=args.soft_bridge_min_probability,
             soft_bridge_max_gap_ms=args.soft_bridge_max_gap_ms,
             soft_bridge_gap_units=args.soft_bridge_gap_units,
+            viterbi_transition_penalty=args.viterbi_transition_penalty,
+            symbol_hmm_decoding=args.symbol_hmm_decoding,
+            symbol_hmm_beam_width=args.symbol_hmm_beam_width,
+            symbol_hmm_max_candidates=args.symbol_hmm_max_candidates,
+            symbol_hmm_unit_spread=args.symbol_hmm_unit_spread,
+            symbol_hmm_unit_steps=args.symbol_hmm_unit_steps,
+            symbol_hmm_transition_penalty=args.symbol_hmm_transition_penalty,
+            symbol_hmm_min_unit_s=args.symbol_hmm_min_unit_s,
+            symbol_hmm_max_unit_s=args.symbol_hmm_max_unit_s,
+            symbol_hmm_live_interval_s=args.symbol_hmm_live_interval_s,
+            lattice_decoding=args.lattice_decoding,
+            lattice_beam_width=args.lattice_beam_width,
+            lattice_max_candidates=args.lattice_max_candidates,
+            lattice_tone_margin_units=args.lattice_tone_margin_units,
+            lattice_gap_margin_units=args.lattice_gap_margin_units,
             merge_short_gaps_ms=args.merge_short_gaps_ms,
             drop_short_tones_ms=args.drop_short_tones_ms,
             unit_candidate_spread=args.unit_candidate_spread,
@@ -513,6 +528,14 @@ def run_cli_command(args) -> None:
             preview_runs=args.preview_runs,
         )
         print(report_to_json(report) if args.json else format_human_report(report))
+
+    elif args.command == "view-events":
+        from cw.event_view import print_event_view, print_event_view_file
+
+        if args.path is None or str(args.path) == "-":
+            print_event_view(sys.stdin, sys.stdout)
+        else:
+            print_event_view_file(args.path, sys.stdout)
 
     elif args.command == "stream-sim":
         from cw.streaming import WavFileSource

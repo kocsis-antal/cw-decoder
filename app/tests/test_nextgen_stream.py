@@ -357,3 +357,197 @@ def test_nextgen_live_reacquired_dormant_channel_requires_confirmation_again() -
     assert channel.hits == 2
     assert not channel.dormant
     assert [event.kind for event in processor._events].count("CHANNEL_STARTED") == 2
+
+
+def test_nextgen_live_keeps_stable_committed_text_over_much_worse_long_final() -> None:
+    processor = NextgenStreamProcessor(
+        8000,
+        StreamingConfig(final_text_regression_margin=10.0),
+    )
+    channel = processor._channel_for_carrier(700.0)
+    session = processor._session_for_decoded(
+        channel,
+        type("DecodedSessionStub", (), {"start_s": 0.0, "end_s": 1.0})(),
+    )
+    assert session is not None
+    session.committed_text = "CQ CQ CQ"
+    session.committed_score = 3.5
+    session.final_text = "ST EK C Q C Q C Q C NE E H E"
+    session.final_score = 28.0
+    session.final_evidence = 50.0
+
+    text, score = processor._final_text_for(session)
+
+    assert text == "CQ CQ CQ"
+    assert score == 3.5
+
+
+def test_nextgen_live_symbol_hmm_is_budgeted_per_carrier() -> None:
+    processor = NextgenStreamProcessor(
+        8000,
+        StreamingConfig(symbol_hmm_decoding=True, live_symbol_hmm_decoding=True, symbol_hmm_live_interval_s=2.0),
+    )
+    channel = processor._channel_for_carrier(700.0)
+
+    processor.processed_duration_s = 1.0
+    assert processor._config_for_channel_decode(channel, final=False).symbol_hmm_decoding
+    processor.processed_duration_s = 1.5
+    assert not processor._config_for_channel_decode(channel, final=False).symbol_hmm_decoding
+    processor.processed_duration_s = 3.1
+    assert processor._config_for_channel_decode(channel, final=False).symbol_hmm_decoding
+    processor.processed_duration_s = 3.2
+    assert processor._config_for_channel_decode(channel, final=True).symbol_hmm_decoding
+
+
+def test_nextgen_live_emits_text_preview_before_stable_commit() -> None:
+    from types import SimpleNamespace
+
+    processor = NextgenStreamProcessor(
+        8000,
+        StreamingConfig(
+            stable_updates=True,
+            preview_updates=True,
+            preview_interval_s=0.0,
+            preview_min_chars=1,
+            min_update_score=25.0,
+            min_live_commit_chars=2,
+        ),
+    )
+    channel = processor._channel_for_carrier(700.0)
+    session = processor._session_for_decoded(channel, SimpleNamespace(start_s=0.0, end_s=1.0))
+    assert session is not None
+
+    assert processor._text_to_commit(session, "C", 1.0) is None
+    processor._maybe_emit_text_preview(channel, session, "C", 1.0, reason="awaiting_stable_prefix")
+
+    assert any(event.kind == "TEXT_PREVIEW" and event.text == "C" for event in processor._events)
+
+
+def test_nextgen_live_emits_signal_active_heartbeat_without_text() -> None:
+    from types import SimpleNamespace
+
+    processor = NextgenStreamProcessor(
+        8000,
+        StreamingConfig(min_track_hits=1, signal_activity_interval_s=1.0),
+    )
+    processor.processed_duration_s = 2.0
+    channel = processor._channel_for_carrier(700.0)
+
+    processor._maybe_emit_signal_active(
+        channel,
+        SimpleNamespace(best=SimpleNamespace(quality_score=12.0)),
+        reason="carrier_detected",
+    )
+
+    assert any(
+        event.kind == "SIGNAL_ACTIVE"
+        and event.channel_id == channel.channel_id
+        and event.reason == "carrier_detected"
+        for event in processor._events
+    )
+
+
+def test_nextgen_live_defaults_to_short_decode_window() -> None:
+    processor = NextgenStreamProcessor(8000, StreamingConfig(live_decode_window_s=2.5))
+    processor._window = __import__('numpy').ones(8000 * 8, dtype=__import__('numpy').float32)
+    signal, start_s = processor._decode_window()
+    assert len(signal) == 8000 * 2 + 4000
+    assert start_s == 5.5
+
+
+def test_nextgen_live_symbol_hmm_is_opt_in_for_low_latency() -> None:
+    processor = NextgenStreamProcessor(8000, StreamingConfig(symbol_hmm_decoding=True))
+    channel = processor._channel_for_carrier(700.0)
+    processor.processed_duration_s = 1.0
+    assert not processor._config_for_channel_decode(channel, final=False).symbol_hmm_decoding
+
+
+def test_nextgen_live_final_uses_preview_suffix_with_small_leading_error() -> None:
+    processor = NextgenStreamProcessor(8000, StreamingConfig(live_progress_min_overlap_chars=3))
+    channel = processor._channel_for_carrier(700.0)
+    session = processor._session_for_decoded(
+        channel,
+        type("DecodedSessionStub", (), {"start_s": 0.0, "end_s": 1.0})(),
+    )
+    assert session is not None
+    session.committed_text = "HA7VY"
+    session.committed_score = 7.9
+    session.final_text = "HA7VY 5E"
+    session.final_score = 7.9
+    session.last_preview_text = "T7VY 5NN"
+    session.last_preview_score = 3.5
+    session.best_preview_text = "T7VY 5NN"
+    session.best_preview_score = 3.5
+
+    text, score = processor._final_text_for(session)
+
+    assert text == "HA7VY 5NN"
+    assert score == 3.5
+
+
+def test_nextgen_live_progress_stitches_preview_with_small_leading_error() -> None:
+    processor = NextgenStreamProcessor(
+        8000,
+        StreamingConfig(
+            stable_updates=True,
+            live_progress_interval_s=1.0,
+            live_progress_min_overlap_chars=3,
+            min_update_score=25.0,
+        ),
+    )
+    channel = processor._channel_for_carrier(700.0)
+    session = processor._session_for_decoded(
+        channel,
+        type("DecodedSessionStub", (), {"start_s": 0.0, "end_s": 1.0})(),
+    )
+    assert session is not None
+    session.committed_text = "HA7VY"
+    session.last_candidate_text = "HA7VY"
+    session.last_commit_s = 0.0
+    processor.processed_duration_s = 2.0
+
+    assert processor._text_to_commit(session, "T7VY 5NN", 3.5) == "HA7VY 5NN"
+
+
+def test_nextgen_live_arbiter_prefers_cleaner_candidate_when_evidence_is_tied() -> None:
+    from cw.nextgen import NextgenCandidate, NextgenSession
+    from cw.nextgen_stream import _LiveSessionHypothesisArbiter
+
+    def cand(text: str, quality: float, evidence: float) -> NextgenCandidate:
+        return NextgenCandidate(
+            carrier_hz=700.0,
+            detector="threshold",
+            threshold_ratio=0.20,
+            threshold=0.0,
+            noise_floor=0.0,
+            signal_floor=1.0,
+            duty_cycle=0.5,
+            unit_s=0.06,
+            wpm=20.0,
+            text=text,
+            tokens=(),
+            quality_score=quality,
+            confidence=0.9,
+            evidence_score=evidence,
+            start_s=0.0,
+            end_s=3.0,
+            runs=(),
+        )
+
+    noisy = cand("CQ KQ TE T", quality=2.29, evidence=38.94)
+    cleaner = cand("CQ CQ TE T", quality=1.98, evidence=38.88)
+    session = NextgenSession(
+        carrier_hz=700.0,
+        session_id=1,
+        start_s=0.0,
+        end_s=3.0,
+        text=noisy.text,
+        confidence=noisy.confidence,
+        best=noisy,
+        candidates=(noisy, cleaner),
+    )
+
+    selected = _LiveSessionHypothesisArbiter().choose(session)
+
+    assert selected.text == "CQ CQ TE T"
+    assert selected.best is cleaner

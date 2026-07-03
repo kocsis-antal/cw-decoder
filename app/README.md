@@ -64,26 +64,39 @@ The report is session-oriented. One carrier may contain several timed
 transmissions, and each session keeps a short candidate ranking so regressions
 can compare both the chosen text and the alternatives. Defaults are tuned for
 the current raw live captures: 8 kHz `s16le`, carrier search up to 3 kHz,
-dynamic threshold candidates, short dropout repair, `--session-gap-s 1.2`, and
+dynamic threshold candidates, short dropout repair, direct Symbol-HMM duration
+candidates with second-pass unit refinement, `--session-gap-s 1.2`, and
 `--min-session-evidence-score 0.0`.
 
-## Next-generation live JSON stream
+## Next-generation live stream
 
-`stream-stdin --json-events` and `stream-raw-file --json-events` now use the
-carrier-centric nextgen stream path.  The JSON wire schema is unchanged, so the
-existing capture/replay workflow still works, but the text decisions are made by
-vivőnkénti baseband-envelope decoding instead of the older STFT text path.
+`stream-stdin` and `stream-raw-file` now use the carrier-centric nextgen stream
+path. Without `--json-events` they render a live human dashboard by default.
+The dashboard is just a viewer on top of the same stream event model: it keeps
+an in-place table of carrier frequency, current state, and a rolling
+per-carrier transcript. Session/gap fragments remain visible beside the currently
+forming text, separated only by extra whitespace, and decoded rows stay visible
+for a while even after the carrier goes dormant. Internal channel/session ids stay hidden. The dashboard uses terminal width when available; for `docker compose run -T` you can pass `COLUMNS` or set `CW_VIEW_COLUMNS` explicitly. With `--json-events` the command keeps the
+stable JSONL wire schema for tools, servers, future web UI adapters, and deep
+debugging. The text decisions are made by vivőnkénti baseband-envelope decoding
+instead of the older STFT text path.
 
-The live layer keeps a recent rolling decode window for CPU safety, assigns
-stable channel/session ids, and emits the usual lifecycle events:
+The live layer is intentionally low-latency. Earlier builds repeatedly re-decoded
+a long rolling batch window; that made strong/old carriers dominate live updates.
+The default live window is now short (`--live-decode-window-s`, default 3 s), while
+committed text is carried forward by the stream state machine. The expensive
+Symbol-HMM remains available for offline decoding and can be opted into for live
+experiments, but the live default uses the faster envelope/lattice path so the
+dashboard keeps moving. The streamer assigns stable channel/session ids and emits
+the usual lifecycle events:
 
 ```text
 CHANNEL_STARTED -> SESSION_STARTED -> TEXT_COMMITTED -> SESSION_FINAL -> CHANNEL_DORMANT
 ```
 
 Defaults are intended to work without extra parameters for the current capture
-workflow: 8 kHz raw PCM, tone search up to 3 kHz, dynamic thresholds, adaptive
-gap model, short dropout repair, and a small finalization delay.  Fine-tuning
+workflow: 8 kHz raw PCM, tone search up to 3 kHz, a short live decode window, dynamic thresholds, adaptive
+gap model, and short dropout repair.  Fine-tuning
 parameters remain available, but they are normal decoder controls rather than
 separate old/new code paths.
 
@@ -97,15 +110,31 @@ ffmpeg -hide_banner -loglevel error \
   python -m cw.cli stream-stdin \
     --sample-rate 8000 \
     --sample-format s16le \
-    --json-events \
     --prune-committed-active-sessions \
     --live-stats-interval-s 5 \
     --no-finalize-on-interrupt \
     --capture-raw "samples/live/${ts}.s16le"
 ```
 
+
+For a separate viewer pipeline, keep the decoder in JSONL mode and pipe it into
+the dashboard renderer:
+
+```bash
+python -m cw.cli stream-stdin --sample-rate 8000 --sample-format s16le --json-events \
+| python -m cw.cli view-events
+```
+
+Use `--json-events` directly when another program consumes the stream. Use
+`--human-events` only for the old verbose lifecycle log.
+
 Windows/VB-Cable CMD example:
 
 ```cmd
-ffmpeg -hide_banner -loglevel error -f dshow -i audio="CABLE Output (VB-Audio Virtual Cable)" -f s16le -ac 1 -ar 8000 - | docker compose -f infra\compose.yml run --rm -T cw python -m cw.cli stream-stdin --sample-rate 8000 --sample-format s16le --json-events --prune-committed-active-sessions --live-stats-interval-s 5 --no-finalize-on-interrupt --capture-raw "samples/live/%ts%.s16le"
+ffmpeg -hide_banner -loglevel error -f dshow -i audio="CABLE Output (VB-Audio Virtual Cable)" -f s16le -ac 1 -ar 8000 - | docker compose -f infra\compose.yml run --rm -T cw python -m cw.cli stream-stdin --sample-rate 8000 --sample-format s16le --prune-committed-active-sessions --live-stats-interval-s 5 --no-finalize-on-interrupt --capture-raw "samples/live/%ts%.s16le"
 ```
+
+
+## Live receiver note
+
+Live monitoring uses the dashboard human view by default.  The live receiver now uses two separate windows: a short carrier-detection window, and a longer per-carrier text-decode window.  This keeps new/second carriers responsive without starving common phrases such as `CQ CQ DE ...` of enough timing context.
