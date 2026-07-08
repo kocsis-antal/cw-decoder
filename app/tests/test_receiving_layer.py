@@ -112,7 +112,7 @@ def test_spectral_carrier_detection_rejects_noise_only_relative_peaks() -> None:
         min_tone_hz=200.0,
         max_tone_hz=3000.0,
         max_carriers=5,
-        min_separation_hz=80.0,
+        peak_separation_hz=80.0,
         relative_threshold=0.05,
         min_snr_db=0.0,
     )
@@ -122,7 +122,7 @@ def test_spectral_carrier_detection_rejects_noise_only_relative_peaks() -> None:
         min_tone_hz=200.0,
         max_tone_hz=3000.0,
         max_carriers=5,
-        min_separation_hz=80.0,
+        peak_separation_hz=80.0,
         relative_threshold=0.05,
         min_snr_db=6.0,
     )

@@ -1,24 +1,22 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 
-from cw.decoder.bank import DecoderBank
-from cw.decoder.tokens import TOKEN_UNKNOWN, tokens_to_text
-from cw.decoder.run_decoder import RunDecoder
-from cw.io.models import AudioBlock
+from cw.app.channel_output import ChannelOutput, channel_outputs_from_states
 from cw.app.config import ProcessingConfig
 from cw.app.debug_output import ChannelDebugOutput, channel_debug_output_from_layers
-from cw.app.transcript import ChannelTranscript, absolute_tokens, apply_transcript_update, relative_tokens, uncommitted_tail, winner_from_transcript
+from cw.app.transcript import split_winner_tokens
+from cw.decoder.api import DecodeResult
+from cw.decoder.bank import DecoderBank
+from cw.decoder.run_decoder import RunDecoder
+from cw.io.models import AudioBlock
 from cw.receiving.models import ChannelSignal, ReceiveChunk, ReceivingStats
 from cw.receiving.processor import Receiver
-from cw.signal.segmenters import SignalSegmenterBank
 from cw.selection.arbiter import ChannelResultSelector
 from cw.selection.debug import ChannelSelectionDebug
 from cw.selection.models import ChannelDecodedTexts, ChannelWinner, SelectionInput, TrackDecodedTexts
-from cw.app.channel_output import ChannelOutput, channel_outputs_from_states
 from cw.signal.models import SignalTrack
-from cw.decoder.api import DecodedText, DecodeResult
-
+from cw.signal.segmenters import SignalSegmenterBank
 
 
 @dataclass(frozen=True)
@@ -50,15 +48,17 @@ class _DecodedTrack:
 
 
 class ProcessingPipeline:
-    """Application composition pipeline: it wires layers, but owns no DSP policy.
+    """Application composition pipeline: wires layers and owns app-only policy.
 
-    The input reader/capture may run ahead of the decoder, but the receiving,
-    signal, decoder and selection layers are intentionally kept ordered.  Live
-    CPU use is reduced by committing stable per-channel text prefixes and
-    trimming the audio that produced them, not by Python worker threads.
+    The app receives audio input, pushes it through receiving/signal/decoder/
+    selection, then turns the selected current tokens into JSON-ready channel
+    output.  Stable-prefix splitting is not a separate memory layer: it marks
+    the current winner and feeds the receiver an audio trim point for the next
+    iteration.
     """
 
     def __init__(self, sample_rate: int, config: ProcessingConfig, *, debug: bool = False) -> None:
+        self.config = config
         self.receiver = Receiver(sample_rate, config)
         self.segmenters = SignalSegmenterBank.default(config)
         self.decoders = DecoderBank((RunDecoder(config),))
@@ -91,15 +91,13 @@ class ProcessingPipeline:
     def _process_receive_chunk(self, receive_chunk: ReceiveChunk) -> OutputChunk:
         segmented_channels = self._segment_channels(receive_chunk.channels)
         decoded_channels, debug_track_results_by_channel = self._decode_segmented_channels(segmented_channels)
-        decoded_channels_for_selection = self._decoded_uncommitted_channels(decoded_channels, receive_chunk.channels)
-
-        selection_input = SelectionInput(channels=tuple(decoded_channels_for_selection))
+        selection_input = SelectionInput(channels=tuple(decoded_channels))
         if self.debug:
             selected, selection_debug = self.selector.select_with_debug(selection_input, time_s=receive_chunk.time_s)
         else:
             selected = self.selector.select(selection_input, time_s=receive_chunk.time_s)
             selection_debug = None
-        channel_winners = self._apply_channel_transcripts(receive_chunk, selected.winners)
+        channel_winners = self._split_selected_winners(receive_chunk, selected.winners)
         outputs = channel_outputs_from_states(receive_chunk, channel_winners)
         debug_outputs = self._debug_outputs(receive_chunk, debug_track_results_by_channel, selection_debug) if self.debug else ()
         return OutputChunk(
@@ -110,51 +108,18 @@ class ProcessingPipeline:
             stats=receive_chunk.stats,
         )
 
-
-
-    def _decoded_uncommitted_channels(
-        self,
-        decoded_channels: list[ChannelDecodedTexts],
-        signals: tuple[ChannelSignal, ...],
-    ) -> list[ChannelDecodedTexts]:
-        signals_by_id = {signal.channel_id: signal for signal in signals}
-        output: list[ChannelDecodedTexts] = []
-        for decoded_channel in decoded_channels:
-            signal = signals_by_id.get(decoded_channel.channel_id)
-            tracked = self.receiver.tracked_channel(decoded_channel.channel_id)
-            if signal is None or tracked is None:
-                output.append(decoded_channel)
-                continue
-            transcript = _channel_transcript(tracked)
-            output.append(_trim_decoded_channel_to_uncommitted(decoded_channel, signal, transcript))
-        return output
-
-    def _apply_channel_transcripts(self, receive_chunk: ReceiveChunk, winners: tuple[ChannelWinner, ...]) -> tuple[ChannelWinner, ...]:
+    def _split_selected_winners(self, receive_chunk: ReceiveChunk, winners: tuple[ChannelWinner, ...]) -> tuple[ChannelWinner, ...]:
         channels_by_id = {channel.channel_id: channel for channel in receive_chunk.channels}
-        winners_by_id = {winner.channel_id: winner for winner in winners}
         output: list[ChannelWinner] = []
-        config = self.decoders.decoders[0].config
         for winner in winners:
             signal = channels_by_id.get(winner.channel_id)
-            tracked = self.receiver.tracked_channel(winner.channel_id)
-            if signal is None or tracked is None:
+            if signal is None:
                 output.append(winner)
                 continue
-            transcript = _channel_transcript(tracked)
-            update = apply_transcript_update(transcript, signal, winner, config)
-            if update.trim_before_s is not None:
-                self.receiver.commit_channel_audio(winner.channel_id, before_s=update.trim_before_s)
-            output.append(update.winner)
-        for signal in receive_chunk.channels:
-            if signal.channel_id in winners_by_id:
-                continue
-            tracked = self.receiver.tracked_channel(signal.channel_id)
-            if tracked is None:
-                continue
-            transcript = _channel_transcript(tracked)
-            transcript_winner = winner_from_transcript(signal, transcript, time_s=receive_chunk.time_s)
-            if transcript_winner is not None:
-                output.append(transcript_winner)
+            split_winner, trim_before_s = split_winner_tokens(signal, winner, self.config)
+            if trim_before_s is not None:
+                self.receiver.trim_channel_audio_before(winner.channel_id, before_s=trim_before_s)
+            output.append(split_winner)
         return tuple(output)
 
     def _segment_channels(self, channels: tuple[ChannelSignal, ...]) -> tuple[_SegmentedChannel, ...]:
@@ -217,8 +182,8 @@ class ProcessingPipeline:
 
     def _map_items(self, func, items) -> tuple:
         # Keep the live pipeline single-threaded after the reader/capture stage.
-        # The expensive part is reduced by committing stable channel prefixes and
-        # trimming their audio, not by Python worker threads.
+        # The expensive part is reduced by feeding stable-prefix trim points back
+        # into receiving, not by Python worker threads.
         return tuple(func(item) for item in tuple(items))
 
     def _debug_outputs(
@@ -239,46 +204,3 @@ class ProcessingPipeline:
             )
             for channel in receive_chunk.channels
         )
-
-
-
-
-def _trim_decoded_channel_to_uncommitted(
-    decoded_channel: ChannelDecodedTexts,
-    signal: ChannelSignal,
-    transcript: ChannelTranscript,
-) -> ChannelDecodedTexts:
-    tracks: list[TrackDecodedTexts] = []
-    for track in decoded_channel.tracks:
-        results: list[DecodeResult] = []
-        for result in track.results:
-            answers: list[DecodedText] = []
-            for answer in result.answers:
-                if not answer.tokens:
-                    answers.append(answer)
-                    continue
-                absolute = absolute_tokens(answer.tokens, offset_s=signal.start_s)
-                tail_absolute = uncommitted_tail(transcript, absolute)
-                tail_relative = relative_tokens(tail_absolute, offset_s=signal.start_s)
-                text = tokens_to_text(tail_relative)
-                if not text:
-                    continue
-                answers.append(
-                    DecodedText(
-                        text=text,
-                        unresolved_tokens=sum(1 for token in tail_relative if token.kind == TOKEN_UNKNOWN),
-                        tokens=tail_relative,
-                    )
-                )
-            if answers:
-                results.append(DecodeResult(decoder=result.decoder, answers=tuple(answers)))
-        tracks.append(replace(track, results=tuple(results)))
-    return replace(decoded_channel, tracks=tuple(tracks))
-
-
-def _channel_transcript(tracked_channel) -> ChannelTranscript:
-    transcript = getattr(tracked_channel, "transcript", None)
-    if not isinstance(transcript, ChannelTranscript):
-        transcript = ChannelTranscript()
-        tracked_channel.transcript = transcript
-    return transcript

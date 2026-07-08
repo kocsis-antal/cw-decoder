@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from cw.receiving.config import ReceivingConfig, effective_tracker_frame_ms, effective_tracker_hop_ms, peak_min_separation_hz
+from cw.receiving.config import ReceivingConfig, carrier_alias_compare_hz, carrier_peak_separation_hz, effective_tracker_frame_ms, effective_tracker_hop_ms
 from cw.receiving.models import CarrierObservation
 from cw.receiving.spectrum import SpectrumPeak, baseband_envelope, detect_carriers_in_audio
 
@@ -23,7 +23,7 @@ class CarrierObserver:
             min_tone_hz=self.config.min_tone_hz,
             max_tone_hz=self.config.max_tone_hz,
             max_carriers=self.config.max_tracks,
-            min_separation_hz=peak_min_separation_hz(self.config),
+            peak_separation_hz=carrier_peak_separation_hz(self.config),
             relative_threshold=self.config.peak_relative_threshold,
             min_snr_db=self.config.carrier_min_snr_db,
             frame_ms=effective_tracker_frame_ms(self.config),
@@ -56,7 +56,7 @@ def suppress_correlated_carrier_aliases(
         trace = _carrier_keying_trace(signal, sample_rate, float(candidate.carrier_hz), config)
         is_alias = False
         for kept, kept_trace in zip(selected, traces):
-            if abs(float(candidate.carrier_hz) - float(kept.carrier_hz)) > config.min_separation_hz:
+            if abs(float(candidate.carrier_hz) - float(kept.carrier_hz)) > carrier_alias_compare_hz(config):
                 continue
             if _trace_correlation(trace, kept_trace) >= config.alias_correlation:
                 is_alias = True

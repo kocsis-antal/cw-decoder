@@ -54,7 +54,7 @@ def test_decoder_expands_unknown_runs_locally_not_as_one_global_switch() -> None
     )
 
     timed_runs = timed_runs_from_signal_track(track)
-    paths = expand_unknown_runs(timed_runs, max_expansions=16)
+    paths = expand_unknown_runs(timed_runs)
     path_durations = [tuple(round(run.duration_s, 3) for run in path) for path in paths]
 
     assert [run.state for run in timed_runs] == [RunState.MARK, RunState.UNKNOWN, RunState.SPACE, RunState.UNKNOWN, RunState.MARK]
@@ -107,7 +107,7 @@ def test_decoder_answer_order_does_not_use_text_as_tiebreaker() -> None:
     assert "answer.text" not in source
 
 
-def test_decoder_refuses_tracks_with_too_many_unknown_runs() -> None:
+def test_decoder_refuses_tracks_that_would_expand_too_many_unknown_branches() -> None:
     track = SignalTrack(
         analyzer="unit-test",
         runs=(
@@ -120,6 +120,16 @@ def test_decoder_refuses_tracks_with_too_many_unknown_runs() -> None:
         unknown_ratio=0.05,
     )
 
-    result = RunDecoder(ProcessingConfig(decoder_max_unknown_runs=1)).decode(track)
+    result = RunDecoder(ProcessingConfig(decoder_max_unknown_branches=2)).decode(track)
 
     assert result.answers == ()
+
+
+def test_decoder_does_not_apply_fixed_answer_count_limit() -> None:
+    import inspect
+    import cw.decoder.run_decoder as run_decoder
+
+    source = inspect.getsource(run_decoder._decode_timed_runs)
+
+    assert "decoder_max_answers" not in source
+    assert "answers[:" not in source

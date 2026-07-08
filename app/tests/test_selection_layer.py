@@ -7,6 +7,7 @@ from cw.app.channel_output import channel_outputs_from_states
 from cw.decoder.api import DecodedText, DecodeResult
 from cw.decoder.tokens import char_token, gap_token
 from cw.selection.arbiter import ChannelResultSelector
+from cw.selection.config import SelectionConfig
 from cw.selection.models import ChannelDecodedTexts, SelectionInput, TrackDecodedTexts
 from cw.receiving.models import ChannelSignal, ChannelState, ReceiveChunk
 
@@ -64,7 +65,7 @@ def test_selection_groups_identical_text_support() -> None:
         )
     )
 
-    chunk = ChannelResultSelector().select(selection, time_s=1.0)
+    chunk = ChannelResultSelector(config=SelectionConfig(selection_candidate_families=())).select(selection, time_s=1.0)
 
     assert chunk.winners[0].text == "CQ"
 
@@ -96,13 +97,13 @@ def test_selection_uses_parameter_neighbor_stability() -> None:
         )
     )
 
-    chunk = ChannelResultSelector().select(selection, time_s=1.0)
+    chunk = ChannelResultSelector(config=SelectionConfig(selection_candidate_families=())).select(selection, time_s=1.0)
 
     assert chunk.winners[0].text == "RIGHT"
 
 
 def test_selection_is_stateless_and_uses_current_encounter_order_as_tiebreaker() -> None:
-    selector = ChannelResultSelector()
+    selector = ChannelResultSelector(config=SelectionConfig(selection_candidate_families=()))
     first = SelectionInput(
         channels=(
             _channel(
@@ -157,7 +158,7 @@ def test_selection_winner_is_merged_into_channel_update_json() -> None:
         SelectionInput(
             channels=(
                 _channel(
-                    _track("threshold_activity:threshold=0.30", DecodedText(text="CQ", unresolved_tokens=0)),
+                    _track("energy_distribution:p=0.80", DecodedText(text="CQ", unresolved_tokens=0)),
                     channel_id=4,
                 ),
             )
@@ -201,7 +202,7 @@ def test_selection_treats_family_diversity_as_ranking_not_a_hard_filter() -> Non
         )
     )
 
-    selected, debug = ChannelResultSelector().select_with_debug(selection, time_s=1.0)
+    selected, debug = ChannelResultSelector(config=SelectionConfig(selection_candidate_families=())).select_with_debug(selection, time_s=1.0)
 
     assert len(selected.winners) == 1
     assert selected.winners[0].text == "NOISE"
@@ -220,15 +221,32 @@ def test_selection_allows_single_family_result_when_only_one_family_is_configure
         )
     )
 
-    chunk = ChannelResultSelector().select(selection, time_s=1.0)
+    chunk = ChannelResultSelector(config=SelectionConfig(selection_candidate_families=("threshold_activity",))).select(selection, time_s=1.0)
 
     assert len(chunk.winners) == 1
     assert chunk.winners[0].text == "CQ"
 
 
-def test_selection_can_require_multiple_supporting_paths() -> None:
-    from cw.selection.config import SelectionConfig
 
+
+def test_default_selection_keeps_threshold_debug_but_does_not_select_it() -> None:
+    selection = SelectionInput(
+        channels=(
+            _channel(
+                _track("threshold_activity:threshold=0.25", DecodedText(text="CQ", unresolved_tokens=0)),
+                _track("threshold_activity:threshold=0.30", DecodedText(text="CQ", unresolved_tokens=0)),
+            ),
+        )
+    )
+
+    selected, debug = ChannelResultSelector().select_with_debug(selection, time_s=1.0)
+
+    assert selected.winners == ()
+    assert debug.channels[0].groups[0].text == "CQ"
+    assert debug.channels[0].groups[0].eligible is False
+    assert debug.channels[0].groups[0].rejection_reason == "selection_family_not_allowed"
+
+def test_selection_can_require_multiple_supporting_paths() -> None:
     selection = SelectionInput(
         channels=(
             _channel(
@@ -237,7 +255,7 @@ def test_selection_can_require_multiple_supporting_paths() -> None:
         )
     )
 
-    selected, debug = ChannelResultSelector(config=SelectionConfig(selection_min_support_count=2)).select_with_debug(selection, time_s=1.0)
+    selected, debug = ChannelResultSelector(config=SelectionConfig(selection_min_support_count=2, selection_candidate_families=())).select_with_debug(selection, time_s=1.0)
 
     assert selected.winners == ()
     assert debug.channels[0].groups[0].eligible is False
@@ -265,3 +283,47 @@ def test_selection_is_stateless_and_does_not_hold_previous_when_absent() -> None
     )
 
     assert chunk.winners == ()
+
+
+def test_selection_does_not_let_many_same_family_variants_outvote_two_families() -> None:
+    selection = SelectionInput(
+        channels=(
+            _channel(
+                _track("threshold_activity:threshold=0.20", DecodedText(text="NO_GAP", unresolved_tokens=0)),
+                _track("threshold_activity:threshold=0.25", DecodedText(text="NO_GAP", unresolved_tokens=0)),
+                _track("threshold_activity:threshold=0.30", DecodedText(text="NO_GAP", unresolved_tokens=0)),
+                _track("threshold_activity:threshold=0.35", DecodedText(text="NO_GAP", unresolved_tokens=0)),
+                _track("energy_distribution:p=0.80", DecodedText(text="WITH GAP", unresolved_tokens=0)),
+                _track("adaptive_timing", DecodedText(text="WITH GAP", unresolved_tokens=0)),
+            ),
+        )
+    )
+
+    selected, debug = ChannelResultSelector(config=SelectionConfig(selection_candidate_families=())).select_with_debug(selection, time_s=1.0)
+
+    assert selected.winners[0].text == "WITH GAP"
+    winning_group = next(group for group in debug.channels[0].groups if group.selected)
+    assert winning_group.family_count == 2
+    assert winning_group.support_count == 2
+    assert winning_group.final_score == 2.0
+
+
+def test_selection_unknown_penalty_is_ranking_not_absolute_veto() -> None:
+    selection = SelectionInput(
+        channels=(
+            _channel(
+                _track("threshold_activity:threshold=0.30", DecodedText(text="CLEAN", unresolved_tokens=0)),
+                _track("energy_distribution:p=0.80", DecodedText(text="BETTER□", unresolved_tokens=1)),
+                _track("adaptive_timing", DecodedText(text="BETTER□", unresolved_tokens=1)),
+            ),
+        )
+    )
+
+    selected, debug = ChannelResultSelector(config=SelectionConfig(selection_candidate_families=())).select_with_debug(selection, time_s=1.0)
+
+    assert selected.winners[0].text == "BETTER□"
+    winning_group = next(group for group in debug.channels[0].groups if group.selected)
+    assert winning_group.family_count == 2
+    assert winning_group.unresolved_tokens == 1
+    assert winning_group.unknown_penalty_score > 0
+    assert winning_group.final_score > 1.0

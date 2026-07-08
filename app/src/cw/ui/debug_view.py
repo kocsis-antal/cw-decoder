@@ -61,7 +61,9 @@ def _format_channel_debug(payload: dict) -> list[str]:
                 f"bad={int(group.get('unresolved_tokens') or 0)} "
                 f"support={int(group.get('support_count') or 0)} "
                 f"families={int(group.get('family_count') or 0)} "
-                f"neighbors={int(group.get('neighbor_stability') or 0)}{kept}{rejected}"
+                f"neighbors={int(group.get('neighbor_stability') or 0)} "
+                f"score={float(group.get('final_score') or 0.0):.2f} "
+                f"unknown_penalty={float(group.get('unknown_penalty_score') or 0.0):.2f}{kept}{rejected}"
             )
     return lines
 

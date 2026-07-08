@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from cw.receiving.models import ChannelState
 
@@ -26,4 +25,3 @@ class TrackedChannel:
     state: ChannelState = ChannelState.CANDIDATE
     dropped_by_limit: bool = False
     audio_trim_before_s: float = 0.0
-    transcript: Any = None

@@ -7,7 +7,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, TextIO
 
-from cw.app.channel_output import ChannelOutput, channel_output_from_dict as _parse_channel_output, channel_output_display_text
+from cw.app.channel_output import (
+    ChannelOutput,
+    append_non_overlapping_tokens,
+    channel_output_from_dict as _parse_channel_output,
+    channel_output_display_text,
+    stable_tentative_display_text,
+)
 
 
 ANSI_CLEAR_SCREEN = "\x1b[2J\x1b[H"
@@ -22,6 +28,8 @@ class _ChannelRow:
     carrier_hz: float
     state: str = "candidate"
     text: str = ""
+    committed_tokens: tuple = ()
+    tentative_tokens: tuple = ()
     last_seen_s: float = 0.0
     last_text_s: float = 0.0
 
@@ -75,9 +83,8 @@ class HumanDashboardRenderer:
         row = self._row_for(output)
         row.state = output.state or row.state or "active"
         row.last_seen_s = self._current_time_s
-        text = channel_output_display_text(output).strip()
+        text = self._update_row_text(row, output)
         if text:
-            row.text = text
             row.last_text_s = self._current_time_s
 
         self._drop_stale_rows()
@@ -106,6 +113,26 @@ class HumanDashboardRenderer:
         else:
             print("\n".join(lines), file=self._output_stream, flush=True)
         self._started = True
+
+    def _update_row_text(self, row: _ChannelRow, output: ChannelOutput) -> str:
+        if output.tokens:
+            stable_count = max(0, min(int(output.stable_token_count), len(output.tokens)))
+            stable_tokens = tuple(output.tokens[:stable_count])
+            tentative_tokens = tuple(output.tokens[stable_count:])
+            if stable_tokens:
+                row.committed_tokens = append_non_overlapping_tokens(row.committed_tokens, stable_tokens)
+            row.tentative_tokens = tentative_tokens
+            rendered = stable_tentative_display_text(row.committed_tokens, row.tentative_tokens)
+            if rendered:
+                row.text = rendered
+            return row.text
+
+        text = channel_output_display_text(output).strip()
+        if text:
+            # Backwards-compatible path for older callers/tests that only pass
+            # pre-rendered text and no token stability metadata.
+            row.text = text
+        return row.text
 
     def _row_for(self, output: ChannelOutput) -> _ChannelRow:
         row = self._rows.get(output.channel_id)

@@ -84,51 +84,46 @@ def _add_raw_input_options(parser: argparse.ArgumentParser, *, sample_rate_requi
 def _add_receiver_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--input-block-ms", type=float, default=10.0)
     parser.add_argument("--emit-interval-s", type=float, default=0.50)
-    parser.add_argument("--commit-hold-chars", type=int, default=3, help="do not commit this many trailing decoded characters while a channel is active")
-    parser.add_argument("--commit-fallback-after-chars", type=int, default=6, help="if no word boundary appears, commit part of a stable no-space run; 0 disables")
-    parser.add_argument("--commit-audio-context-chars", type=int, default=2, help="keep this many committed characters in the audio tail as timing context")
-    parser.add_argument("--commit-unresolved", action="store_true", help="allow committing decode-error markers; default keeps them tentative")
-    parser.add_argument("--no-incremental-commit", action="store_true", help="disable stable-prefix text memory and audio trimming")
+    parser.add_argument("--stable-prefix-hold-chars", "--commit-hold-chars", dest="stable_prefix_hold_chars", type=int, default=3, help="keep this many trailing decoded characters tentative while a channel is active")
+    parser.add_argument("--stable-prefix-fallback-after-chars", "--commit-fallback-after-chars", dest="stable_prefix_fallback_after_chars", type=int, default=6, help="if no word boundary appears, mark part of a no-space run stable; 0 disables")
+    parser.add_argument("--stable-audio-context-chars", "--commit-audio-context-chars", dest="stable_audio_context_chars", type=int, default=2, help="keep this many stable characters in the audio tail as timing context")
+    parser.add_argument("--stable-prefix-commit-unresolved", "--commit-unresolved", dest="stable_prefix_commit_unresolved", action="store_true", help="allow decode-error markers to become stable; default keeps them tentative")
+    parser.add_argument("--no-stable-prefix", "--no-incremental-commit", dest="no_stable_prefix", action="store_true", help="disable stable-prefix marking and receiving audio trimming")
     parser.add_argument("--min-tone-hz", type=float, default=200.0)
     parser.add_argument("--max-tone-hz", type=float, default=3000.0)
     parser.add_argument("--max-tracks", type=int, default=5)
-    parser.add_argument("--max-active-channels", type=int, default=12, help="0 means unlimited")
-    parser.add_argument("--decoder-max-answers", type=int, default=5)
-    parser.add_argument("--decoder-max-unknown-expansions", type=int, default=256)
-    parser.add_argument("--bandwidth-hz", type=float, default=40.0)
+    parser.add_argument("--channel-match-hz", "--bandwidth-hz", dest="channel_match_hz", type=float, default=40.0, help="normal same-channel tracking tolerance in Hz")
     parser.add_argument("--carrier-window-s", type=float, default=2.0)
     parser.add_argument("--channel-window-s", type=float, default=8.0)
     parser.add_argument("--max-history-s", type=float, default=12.0)
     parser.add_argument("--peak-relative-threshold", type=float, default=0.05)
     parser.add_argument("--carrier-min-snr-db", type=float, default=14.0, help="minimum per-carrier spectral SNR for opening a channel")
-    parser.add_argument("--min-separation-hz", type=float, default=80.0)
-    parser.add_argument("--peak-min-separation-hz", type=float, default=0.0, help="0 uses --min-separation-hz")
+    parser.add_argument("--carrier-peak-separation-hz", "--min-separation-hz", dest="carrier_peak_separation_hz", type=float, default=80.0, help="minimum spacing between simultaneous FFT carrier peaks")
+    parser.add_argument("--peak-min-separation-hz", type=float, default=0.0, help=argparse.SUPPRESS)
     parser.add_argument("--channel-reacquire-hz", type=float, default=80.0, help="frequency distance used to reacquire the same channel")
     parser.add_argument("--no-alias-suppression", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--signal-threshold-ratios", default="0.25,0.30,0.35,0.42", help="comma-separated signal threshold ratios")
     parser.add_argument("--signal-uncertainty-ratio", type=float, default=0.08)
     parser.add_argument("--signal-distribution-probabilities", default="0.70,0.80,0.90", help="comma-separated posterior acceptance probabilities for distribution-based signal tracks")
-    parser.add_argument("--no-flexible-timing", action="store_true", help="disable adaptive ambiguous ti/ta and gap timing interpretations")
     parser.add_argument("--dot-dash-boundary-units", type=float, default=2.0)
     parser.add_argument("--no-adaptive-tone-thresholds", action="store_true", help="disable data-driven ti/ta boundary estimation")
-    parser.add_argument("--tone-ambiguity-units", type=float, default=0.35)
     parser.add_argument("--element-letter-gap-units", type=float, default=2.6)
     parser.add_argument("--no-adaptive-element-letter-gap", action="store_true", help="disable data-driven element/letter gap boundary estimation")
     parser.add_argument("--min-element-letter-gap-units", type=float, default=1.4)
     parser.add_argument("--max-element-letter-gap-units", type=float, default=2.8)
-    parser.add_argument("--gap-ambiguity-units", type=float, default=0.55)
-    parser.add_argument("--squeezed-word-gap-margin-units", type=float, default=1.25)
     parser.add_argument("--session-gap-units", type=float, default=14.0, help="gap length, in ti units, decoded as a session_gap token")
     parser.add_argument("--signal-max-cpm", type=float, default=200.0, help="maximum plausible CW speed in characters/minute; marks faster than this are treated as glitches, 0 disables")
     parser.add_argument("--signal-min-keying-separation", type=float, default=1.25, help="minimum low/high envelope separability for accepting a channel as keyed CW")
     parser.add_argument("--signal-max-unknown-ratio", type=float, default=1.0)
-    parser.add_argument("--signal-max-run-count", type=int, default=10000)
-    parser.add_argument("--decoder-max-unknown-runs", type=int, default=8)
     parser.add_argument("--decoder-max-unknown-ratio", type=float, default=0.20)
-    parser.add_argument("--selection-max-unknown-ratio", type=float, default=1.0)
-    parser.add_argument("--selection-max-unresolved-tokens", type=int, default=999)
+    parser.add_argument("--decoder-max-unknown-branches", type=int, default=256, help="maximum MARK/SPACE branches generated from UNKNOWN runs in one decoder track")
     parser.add_argument("--selection-min-support-count", type=int, default=1)
     parser.add_argument("--selection-min-family-count", type=int, default=1)
+    parser.add_argument(
+        "--selection-candidate-families",
+        default="energy_distribution",
+        help="comma-separated analyzer families allowed to produce selected output; empty allows all families",
+    )
 
 
 def _add_output_options(parser: argparse.ArgumentParser) -> None:
@@ -152,56 +147,46 @@ def _build_debug_sink(args: argparse.Namespace):
 
 
 def _build_streaming_config(args: argparse.Namespace) -> ProcessingConfig:
-    peak_min_sep = None if args.peak_min_separation_hz <= 0 else args.peak_min_separation_hz
+    carrier_peak_separation = args.peak_min_separation_hz if args.peak_min_separation_hz > 0 else args.carrier_peak_separation_hz
     max_history_s = None if args.max_history_s <= 0 else args.max_history_s
     return ProcessingConfig(
         input_block_ms=args.input_block_ms,
         emit_interval_s=args.emit_interval_s,
-        incremental_commit_enabled=not args.no_incremental_commit,
-        commit_hold_chars=args.commit_hold_chars,
-        commit_fallback_after_chars=args.commit_fallback_after_chars,
-        commit_unresolved=args.commit_unresolved,
-        commit_audio_context_chars=args.commit_audio_context_chars,
+        stable_prefix_enabled=not args.no_stable_prefix,
+        stable_prefix_hold_chars=args.stable_prefix_hold_chars,
+        stable_prefix_fallback_after_chars=args.stable_prefix_fallback_after_chars,
+        stable_prefix_commit_unresolved=args.stable_prefix_commit_unresolved,
+        stable_audio_context_chars=args.stable_audio_context_chars,
         min_tone_hz=args.min_tone_hz,
         max_tone_hz=args.max_tone_hz,
         max_tracks=args.max_tracks,
-        max_active_channels=args.max_active_channels,
-        bandwidth_hz=args.bandwidth_hz,
+        channel_match_hz=args.channel_match_hz,
         carrier_window_s=args.carrier_window_s,
         channel_window_s=args.channel_window_s,
         max_history_s=max_history_s,
         peak_relative_threshold=args.peak_relative_threshold,
         carrier_min_snr_db=args.carrier_min_snr_db,
-        min_separation_hz=args.min_separation_hz,
-        peak_min_separation_hz=peak_min_sep,
+        carrier_peak_separation_hz=carrier_peak_separation,
         alias_suppression=not args.no_alias_suppression,
         channel_reacquire_hz=args.channel_reacquire_hz,
-        decoder_max_answers=args.decoder_max_answers,
-        decoder_max_unknown_expansions=args.decoder_max_unknown_expansions,
-        decoder_max_unknown_runs=args.decoder_max_unknown_runs,
         decoder_max_unknown_ratio=args.decoder_max_unknown_ratio,
+        decoder_max_unknown_branches=args.decoder_max_unknown_branches,
         signal_threshold_ratios=_parse_float_csv(args.signal_threshold_ratios),
         signal_uncertainty_ratio=args.signal_uncertainty_ratio,
         signal_distribution_acceptance_probabilities=_parse_float_csv(args.signal_distribution_probabilities),
-        flexible_timing=not args.no_flexible_timing,
         dot_dash_boundary_units=args.dot_dash_boundary_units,
         adaptive_tone_thresholds=not args.no_adaptive_tone_thresholds,
-        tone_ambiguity_units=args.tone_ambiguity_units,
         element_letter_gap_units=args.element_letter_gap_units,
         adaptive_element_letter_gap=not args.no_adaptive_element_letter_gap,
         min_element_letter_gap_units=args.min_element_letter_gap_units,
         max_element_letter_gap_units=args.max_element_letter_gap_units,
-        gap_ambiguity_units=args.gap_ambiguity_units,
-        squeezed_word_gap_margin_units=args.squeezed_word_gap_margin_units,
         session_gap_units=args.session_gap_units,
         signal_max_cpm=args.signal_max_cpm,
         signal_min_keying_separation=args.signal_min_keying_separation,
         signal_max_unknown_ratio=args.signal_max_unknown_ratio,
-        signal_max_run_count=args.signal_max_run_count,
-        selection_max_unknown_ratio=args.selection_max_unknown_ratio,
-        selection_max_unresolved_tokens=args.selection_max_unresolved_tokens,
         selection_min_support_count=args.selection_min_support_count,
         selection_min_family_count=args.selection_min_family_count,
+        selection_candidate_families=_parse_str_csv(args.selection_candidate_families),
     )
 
 

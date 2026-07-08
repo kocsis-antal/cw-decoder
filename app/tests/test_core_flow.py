@@ -298,6 +298,49 @@ def test_dashboard_renderer_is_channel_snapshot_view_only() -> None:
     assert "score" not in rendered.lower()
 
 
+
+
+def test_dashboard_appends_stable_json_tokens_instead_of_overwriting_with_audio_tail() -> None:
+    from io import StringIO
+    from cw.ui.dashboard import HumanDashboardRenderer
+
+    stream = StringIO()
+    renderer = HumanDashboardRenderer(stream, use_ansi=False, refresh_interval_s=0.0)
+    renderer.start()
+    renderer.emit(
+        ChannelOutput(
+            channel_id=1,
+            carrier_hz=700.0,
+            state="active",
+            tokens=(
+                char_token("C", start_s=0.0, end_s=0.1),
+                char_token("Q", start_s=0.2, end_s=0.3),
+                gap_token("word_gap", start_s=0.3, end_s=0.6),
+                char_token("D", start_s=0.6, end_s=0.7),
+            ),
+            stable_token_count=3,
+        )
+    )
+    renderer.emit(
+        ChannelOutput(
+            channel_id=1,
+            carrier_hz=700.0,
+            state="active",
+            tokens=(
+                char_token("Q", start_s=0.2, end_s=0.3),
+                gap_token("word_gap", start_s=0.3, end_s=0.6),
+                char_token("D", start_s=0.6, end_s=0.7),
+                char_token("E", start_s=0.8, end_s=0.9),
+            ),
+            stable_token_count=4,
+        )
+    )
+    renderer.close()
+
+    rendered = stream.getvalue()
+    assert "CQ DE" in rendered
+    assert "Q DE" in rendered
+
 def test_channel_output_view_ignores_non_public_json_fields() -> None:
     from io import StringIO
     from cw.ui.dashboard import iter_formatted_jsonl
@@ -364,11 +407,11 @@ def test_signal_layer_filters_tracks_with_too_much_unknown_time() -> None:
     assert _gate_signal_track(track, config) is None
 
 
-def test_signal_layer_filters_tracks_with_too_many_runs() -> None:
+def test_signal_layer_does_not_filter_tracks_only_because_they_have_many_runs() -> None:
     from cw.signal.segmenters import _gate_signal_track
     from cw.signal.models import SignalRun, SignalTrack, SignalState
 
-    config = ProcessingConfig(signal_max_run_count=2)
+    config = ProcessingConfig()
     track = SignalTrack(
         analyzer="unit-test",
         runs=(
@@ -379,7 +422,7 @@ def test_signal_layer_filters_tracks_with_too_many_runs() -> None:
         unknown_ratio=0.0,
     )
 
-    assert _gate_signal_track(track, config) is None
+    assert _gate_signal_track(track, config) is track
 
 
 def test_signal_layer_rejects_unkeyed_tone_as_not_cw_activity() -> None:

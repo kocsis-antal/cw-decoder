@@ -373,8 +373,6 @@ def _merge_adjacent_signal_runs(runs: list[SignalRun]) -> list[SignalRun]:
 def _gate_signal_track(track: SignalTrack, config: SignalConfig) -> SignalTrack | None:
     if track.unknown_ratio > config.signal_max_unknown_ratio:
         return None
-    if len(track.runs) > config.signal_max_run_count:
-        return None
     return track
 
 

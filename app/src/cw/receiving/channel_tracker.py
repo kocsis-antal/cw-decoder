@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from cw.receiving.config import ReceivingConfig, channel_match_hz
+from cw.receiving.config import ReceivingConfig, strict_channel_match_hz
 from cw.receiving.models import CarrierObservation, ChannelState
 from cw.receiving.state import TrackedChannel
 
@@ -88,18 +88,6 @@ class ChannelTracker:
     def _channel_for_observation(self, observation: CarrierObservation, *, time_s: float) -> TrackedChannel | None:
         channel = self._best_channel_for_carrier(observation.carrier_hz, time_s=time_s)
         if channel is None:
-            if self._active_channel_limit_reached(time_s=time_s):
-                channel = self._weakest_reusable_channel(time_s=time_s)
-                if channel is None:
-                    return None
-                channel.hits = max(channel.hits, 1)
-                channel.carrier_hz = _smooth_carrier(channel.carrier_hz, observation.carrier_hz, self.config.carrier_smoothing)
-                channel.last_seen_s = time_s
-                channel.relative_power = observation.relative_power
-                channel.snr_db = observation.snr_db
-                channel.power = observation.power
-                channel.state = ChannelState.CANDIDATE
-                return channel
             channel = TrackedChannel(
                 channel_id=self._next_channel_id,
                 carrier_hz=round(float(observation.carrier_hz), 3),
@@ -123,7 +111,7 @@ class ChannelTracker:
         return channel
 
     def _best_channel_for_carrier(self, carrier_hz: float, *, time_s: float) -> TrackedChannel | None:
-        strict_match_hz = channel_match_hz(self.config)
+        strict_match_hz = strict_channel_match_hz(self.config)
         reacquire_hz = _channel_reacquire_hz(self.config)
         matches: list[tuple[int, float, TrackedChannel]] = []
         for channel in self._channels:
@@ -138,32 +126,6 @@ class ChannelTracker:
             return None
         matches.sort(key=lambda item: (item[0], item[1], -item[2].hits))
         return matches[0][2]
-
-    def _active_channel_limit_reached(self, *, time_s: float) -> bool:
-        if self.config.max_active_channels <= 0:
-            return False
-        return self._active_channel_count(time_s=time_s) >= self.config.max_active_channels
-
-    def _active_channel_count(self, *, time_s: float) -> int:
-        return sum(
-            1
-            for channel in self._channels
-            if not channel.dormant and time_s - channel.last_seen_s <= self.config.max_track_gap_s
-        )
-
-    def _weakest_reusable_channel(self, *, time_s: float) -> TrackedChannel | None:
-        # Reuse a recent candidate/dropped placeholder before allocating more
-        # ids.  Do not steal a started channel: that could merge two real QSOs.
-        candidates = [
-            channel
-            for channel in self._channels
-            if not channel.channel_started
-            and time_s - channel.last_seen_s <= self.config.max_track_gap_s
-        ]
-        if not candidates:
-            return None
-        candidates.sort(key=lambda item: ((item.relative_power or 0.0), item.hits, -item.channel_id))
-        return candidates[0]
 
     def _is_alias_of_recent_channel(self, channel: TrackedChannel, *, time_s: float) -> bool:
         if not self.config.alias_suppression:

@@ -53,12 +53,17 @@ class Receiver:
         self._last_observe_s = self.processed_duration_s
         return self._observe_channels()
 
-    def commit_channel_audio(self, channel_id: int, *, before_s: float) -> None:
+    def trim_channel_audio_before(self, channel_id: int, *, before_s: float) -> None:
         channel = self._tracked_channel(int(channel_id))
         if channel is None:
             return
         previous = max(self._window_start_s, float(channel.audio_trim_before_s or 0.0))
         channel.audio_trim_before_s = max(previous, float(before_s))
+
+
+    # Backwards-compatible method name for older callers.
+    def commit_channel_audio(self, channel_id: int, *, before_s: float) -> None:
+        self.trim_channel_audio_before(channel_id, before_s=before_s)
 
     def tracked_channel(self, channel_id: int) -> TrackedChannel | None:
         return self._tracked_channel(channel_id)
@@ -92,9 +97,23 @@ class Receiver:
 
         return ReceiveChunk(
             time_s=self.processed_duration_s,
-            channels=tuple(self._channel_signal(channel) for channel in tracker_result.channels),
+            channels=tuple(self._reported_channel_signal(channel) for channel in tracker_result.channels),
             stats=self._stats(),
         )
+
+    def _reported_channel_signal(self, channel: TrackedChannel) -> ChannelSignal:
+        if channel.state is ChannelState.DORMANT and channel.channel_started:
+            signal, start_s = self._final_channel_window(channel)
+            return ChannelSignal(
+                channel_id=channel.channel_id,
+                carrier_hz=channel.carrier_hz,
+                start_s=start_s,
+                end_s=start_s + len(signal) / self.sample_rate,
+                audio_window=signal,
+                sample_rate=self.sample_rate,
+                state=channel.state,
+            )
+        return self._channel_signal(channel)
 
     def _final_channel_signal(self, channel: TrackedChannel) -> ChannelSignal:
         if channel.state in {ChannelState.DORMANT, ChannelState.DROPPED}:

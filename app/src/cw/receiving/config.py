@@ -18,23 +18,27 @@ class ReceivingConfig:
 
     min_tone_hz: float = 200.0
     max_tone_hz: float = 3000.0
-    bandwidth_hz: float = 40.0
     peak_relative_threshold: float = 0.05
     carrier_min_snr_db: float = 14.0
-    min_separation_hz: float = 80.0
-    peak_min_separation_hz: float | None = None
+
+    # Three separate frequency notions:
+    # - carrier_peak_separation_hz: FFT peak picking; two simultaneous peaks
+    #   closer than this are treated as one observed carrier candidate.
+    # - channel_match_hz: normal same-channel tracking tolerance between
+    #   consecutive observations.
+    # - channel_reacquire_hz: wider late reacquisition tolerance after a gap.
+    carrier_peak_separation_hz: float = 80.0
+    channel_match_hz: float = 40.0
+    channel_reacquire_hz: float = 80.0
+
+    # Maximum simultaneous carrier observations kept from one spectrum pass.
+    # Candidates are sorted by strength before this cap is applied.
     max_tracks: int = 5
-    # 0 means unlimited.  Keep the default generous: resource control should
-    # come primarily from parallel workers and decoder budgets, not from
-    # silently dropping plausible carriers.
-    max_active_channels: int = 12
 
     alias_suppression: bool = True
     alias_correlation: float = 0.97
     channel_alias_hz: float | None = None
     channel_alias_s: float = 6.0
-    channel_merge_hz: float | None = None
-    channel_reacquire_hz: float = 80.0
     channel_reacquire_s: float = 15.0
     max_track_gap_s: float = 2.0
     carrier_smoothing: float = 0.20
@@ -49,16 +53,18 @@ def effective_tracker_hop_ms(config: ReceivingConfig) -> float:
     return config.tracker_hop_ms if config.tracker_hop_ms is not None else config.hop_ms
 
 
-def peak_min_separation_hz(config: ReceivingConfig) -> float:
-    return config.peak_min_separation_hz or config.min_separation_hz
+def carrier_peak_separation_hz(config: ReceivingConfig) -> float:
+    return float(config.carrier_peak_separation_hz)
 
 
-def channel_merge_hz(config: ReceivingConfig) -> float:
-    return config.channel_merge_hz or config.min_separation_hz
+def strict_channel_match_hz(config: ReceivingConfig) -> float:
+    return float(config.channel_match_hz)
 
 
-def channel_match_hz(config: ReceivingConfig) -> float:
-    return max(channel_merge_hz(config) / 2.0, config.bandwidth_hz)
+def carrier_alias_compare_hz(config: ReceivingConfig) -> float:
+    if config.channel_alias_hz is not None and config.channel_alias_hz > 0:
+        return float(config.channel_alias_hz)
+    return float(config.carrier_peak_separation_hz)
 
 
 def validate_receiving_config(config: ReceivingConfig) -> None:
@@ -84,30 +90,24 @@ def validate_receiving_config(config: ReceivingConfig) -> None:
         raise ValueError("emit_interval_s must be positive")
     if config.min_tone_hz >= config.max_tone_hz:
         raise ValueError("min_tone_hz must be lower than max_tone_hz")
-    if config.bandwidth_hz <= 0:
-        raise ValueError("bandwidth_hz must be positive")
     if not 0 < config.peak_relative_threshold <= 1:
         raise ValueError("peak_relative_threshold must be in the (0, 1] range")
     if config.carrier_min_snr_db < 0:
         raise ValueError("carrier_min_snr_db must not be negative")
-    if config.min_separation_hz <= 0:
-        raise ValueError("min_separation_hz must be positive")
-    if config.peak_min_separation_hz is not None and config.peak_min_separation_hz <= 0:
-        raise ValueError("peak_min_separation_hz must be positive when set")
+    if config.carrier_peak_separation_hz <= 0:
+        raise ValueError("carrier_peak_separation_hz must be positive")
+    if config.channel_match_hz <= 0:
+        raise ValueError("channel_match_hz must be positive")
+    if config.channel_reacquire_hz <= 0:
+        raise ValueError("channel_reacquire_hz must be positive")
     if config.max_tracks <= 0:
         raise ValueError("max_tracks must be positive")
-    if config.max_active_channels < 0:
-        raise ValueError("max_active_channels must not be negative")
     if not 0.0 <= config.alias_correlation <= 1.0:
         raise ValueError("alias_correlation must be in the [0, 1] range")
     if config.channel_alias_hz is not None and config.channel_alias_hz < 0:
         raise ValueError("channel_alias_hz must not be negative when set")
     if config.channel_alias_s < 0:
         raise ValueError("channel_alias_s must not be negative")
-    if config.channel_merge_hz is not None and config.channel_merge_hz <= 0:
-        raise ValueError("channel_merge_hz must be positive when set")
-    if config.channel_reacquire_hz <= 0:
-        raise ValueError("channel_reacquire_hz must be positive")
     if config.channel_reacquire_s <= 0:
         raise ValueError("channel_reacquire_s must be positive")
     if not 0 <= config.carrier_smoothing <= 1:

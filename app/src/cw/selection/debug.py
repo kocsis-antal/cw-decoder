@@ -17,6 +17,9 @@ class SelectionGroupDebug:
     support_count: int
     family_count: int
     neighbor_stability: int
+    family_support_score: float = 0.0
+    unknown_penalty_score: float = 0.0
+    final_score: float = 0.0
     selected: bool = False
     kept_previous: bool = False
     eligible: bool = True

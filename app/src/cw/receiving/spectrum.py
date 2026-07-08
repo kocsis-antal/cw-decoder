@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from cw.dsp.envelope import baseband_envelope
+
 
 @dataclass(frozen=True)
 class SpectrumPeak:
@@ -44,7 +46,7 @@ def detect_carriers_in_audio(
     min_tone_hz: float,
     max_tone_hz: float,
     max_carriers: int,
-    min_separation_hz: float,
+    peak_separation_hz: float,
     relative_threshold: float,
     min_snr_db: float = 0.0,
     frame_ms: float = 30.0,
@@ -59,7 +61,7 @@ def detect_carriers_in_audio(
         min_tone_hz=min_tone_hz,
         max_tone_hz=max_tone_hz,
         max_carriers=max_carriers,
-        min_separation_hz=min_separation_hz,
+        peak_separation_hz=peak_separation_hz,
         relative_threshold=relative_threshold,
         min_snr_db=min_snr_db,
     )
@@ -72,7 +74,7 @@ def detect_carriers_from_spectrum(
     min_tone_hz: float,
     max_tone_hz: float,
     max_carriers: int,
-    min_separation_hz: float,
+    peak_separation_hz: float,
     relative_threshold: float,
     min_snr_db: float = 0.0,
 ) -> tuple[SpectrumPeak, ...]:
@@ -101,7 +103,7 @@ def detect_carriers_from_spectrum(
         if snr_db < min_snr_db:
             continue
         carrier_hz = float(search_freqs[index])
-        if any(abs(carrier_hz - existing.carrier_hz) < min_separation_hz for existing in selected):
+        if any(abs(carrier_hz - existing.carrier_hz) < peak_separation_hz for existing in selected):
             continue
         selected.append(SpectrumPeak(round(carrier_hz, 3), round(relative, 6), power, round(snr_db, 3)))
         if len(selected) >= max_carriers:
@@ -119,25 +121,6 @@ def _spectrum_noise_floor(powers: np.ndarray) -> float:
     # observation.  A relative peak threshold alone accepts arbitrary FFT
     # maxima during silence, because every noise window has a strongest bin.
     return max(float(np.median(finite)), 1e-30)
-
-
-def baseband_envelope(signal: np.ndarray, sample_rate: int, carrier_hz: float, *, lowpass_ms: float) -> np.ndarray:
-    mono = signal.astype(np.float32, copy=False)
-    if len(mono) == 0:
-        return np.asarray([], dtype=np.float32)
-    time = np.arange(len(mono), dtype=np.float32) / float(sample_rate)
-    mixed = mono * np.exp(-2j * np.pi * float(carrier_hz) * time)
-    window_len = max(5, int(round(sample_rate * lowpass_ms / 1000)))
-    if window_len % 2 == 0:
-        window_len += 1
-    window = np.hanning(window_len).astype(np.float32)
-    if float(np.sum(window)) <= 0:
-        window = np.ones(window_len, dtype=np.float32)
-    window = window / np.sum(window)
-    filtered_real = np.convolve(mixed.real, window, mode="same")
-    filtered_imag = np.convolve(mixed.imag, window, mode="same")
-    envelope = np.sqrt(filtered_real * filtered_real + filtered_imag * filtered_imag)
-    return envelope.astype(np.float32, copy=False)
 
 
 def _local_peak_indices(values: np.ndarray) -> list[int]:

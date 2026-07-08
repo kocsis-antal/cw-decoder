@@ -30,8 +30,8 @@ class RunDecoder:
 
     The input is already MARK/SPACE/UNKNOWN timing.  UNKNOWN is handled inside
     the decoder by local branching: every UNKNOWN run can independently become
-    MARK or SPACE for one decoded path.  The decoder returns every distinct text
-    answer it can produce within the configured resource limit.
+    MARK or SPACE for one decoded path.  The only hard UNKNOWN gate here is the
+    configured branch budget; signal quality is handled by unknown time ratio.
     """
 
     name = "run_decoder"
@@ -43,14 +43,15 @@ class RunDecoder:
         if track.unknown_ratio > self.config.decoder_max_unknown_ratio:
             return DecodeResult(decoder=self.name, answers=())
         timed_runs = timed_runs_from_signal_track(track)
-        if _unknown_run_count(timed_runs) > self.config.decoder_max_unknown_runs:
+        if _unknown_branch_count(timed_runs) > self.config.decoder_max_unknown_branches:
             return DecodeResult(decoder=self.name, answers=())
         answers = _decode_timed_runs(timed_runs, self.config)
         return DecodeResult(decoder=self.name, answers=tuple(_to_public_answers(answers)))
 
 
-def _unknown_run_count(timed_runs: tuple[TimedRun, ...]) -> int:
-    return sum(1 for run in timed_runs if run.state is RunState.UNKNOWN)
+def _unknown_branch_count(timed_runs: tuple[TimedRun, ...]) -> int:
+    unknown_runs = sum(1 for run in timed_runs if run.state is RunState.UNKNOWN)
+    return 2 ** unknown_runs
 
 
 def _decode_timed_runs(timed_runs: tuple[TimedRun, ...], config: DecoderConfig) -> list[_DecodedPath]:
@@ -58,12 +59,12 @@ def _decode_timed_runs(timed_runs: tuple[TimedRun, ...], config: DecoderConfig) 
         return []
 
     answers: list[_DecodedPath] = []
-    for hard_runs in expand_unknown_runs(timed_runs, max_expansions=config.decoder_max_unknown_expansions):
+    for hard_runs in expand_unknown_runs(timed_runs):
         answers.extend(_decode_whole_runs(hard_runs, config))
 
     answers = _unique_best_text_answers(answers)
     answers.sort(key=_answer_sort_key)
-    return answers[: config.decoder_max_answers]
+    return answers
 
 
 def _decode_whole_runs(hard_runs: list, config: DecoderConfig) -> list[_DecodedPath]:

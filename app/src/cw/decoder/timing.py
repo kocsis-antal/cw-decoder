@@ -91,15 +91,18 @@ def _to_decoder_state(run: SignalLayerRun) -> RunState:
     return RunState.UNKNOWN
 
 
-def expand_unknown_runs(runs: tuple[TimedRun, ...], *, max_expansions: int) -> list[list[HardRun]]:
-    """Expand each UNKNOWN run locally into MARK/SPACE alternatives.
+def expand_unknown_runs(runs: tuple[TimedRun, ...]) -> list[list[HardRun]]:
+    """Expand each UNKNOWN run locally into every MARK/SPACE alternative.
 
     This is intentionally not a global "all unknowns are MARK" / "all unknowns
     are SPACE" switch.  Every UNKNOWN run branches independently, and each
     produced hard-run path can therefore contain a different local assignment.
+
+    The decoder does not apply an answer-count limit here.  Resource control is
+    handled before this step by UNKNOWN-count / UNKNOWN-ratio gates.  Once a
+    track is accepted as sufficiently known, all local UNKNOWN interpretations
+    are kept for selection.
     """
-    if max_expansions < 1:
-        raise ValueError("max_expansions must be positive")
 
     paths: list[list[HardRun]] = [[]]
     for run in runs:
@@ -110,10 +113,6 @@ def expand_unknown_runs(runs: tuple[TimedRun, ...], *, max_expansions: int) -> l
                 next_path = list(path)
                 _append_hard_run(next_path, _hard_run_from_state(run, state))
                 expanded.append(next_path)
-                if len(expanded) >= max_expansions:
-                    break
-            if len(expanded) >= max_expansions:
-                break
         paths = expanded
     return paths
 
@@ -158,9 +157,8 @@ def decode_segments_with_unit(runs: list[HardRun], unit_s: float, config) -> lis
     Hand-sent CW is not decoded with fixed machine timing.  The dot/dash and
     element/letter/word boundaries are estimated from the current channel
     window and then clamped to sane Morse ranges.  The decoder deliberately does
-    not use QSO-wording hints and does not truncate a list of timing branches;
-    for each candidate unit it returns the timing interpretation implied by the
-    measured channel boundaries.
+    not use QSO-wording hints.  For each candidate unit it returns the single
+    timing interpretation implied by the measured channel boundaries.
     """
 
     if unit_s <= 0:
@@ -183,9 +181,9 @@ def classify_runs(runs: list[HardRun], unit_s: float, config) -> list[Classified
     boundaries = _timing_boundaries(runs, unit_s, config)
     classified: list[ClassifiedRun] = []
     for run in runs:
-        candidates = _classified_run_candidates(run, unit_s, boundaries, config, preferred_only=True)
-        if candidates:
-            classified.append(candidates[0])
+        classified_run = _classify_run(run, unit_s, boundaries, config)
+        if classified_run is not None:
+            classified.append(classified_run)
     return classified
 
 
@@ -211,91 +209,37 @@ def _timing_boundaries(runs: list[HardRun], unit_s: float, config) -> TimingBoun
     )
 
 
-def _classified_run_candidates(
+def _classify_run(
     run: HardRun,
     unit_s: float,
     boundaries: TimingBoundaries,
     config,
-    *,
-    preferred_only: bool = False,
-) -> list[ClassifiedRun]:
+) -> ClassifiedRun | None:
     units = run.duration_s / unit_s if unit_s > 0 else 0.0
     if run.kind is HardRunKind.TONE:
-        symbols = _tone_symbol_candidates(units, boundaries, config, preferred_only=preferred_only)
+        symbol = "." if units < float(boundaries.dot_dash_units) else "-"
     else:
-        symbols = _gap_symbol_candidates(units, boundaries, config, preferred_only=preferred_only)
-    return [
-        ClassifiedRun(
-            kind=run.kind,
-            start_s=round(float(run.start_s), 6),
-            duration_s=round(float(run.duration_s), 6),
-            symbol=symbol,
-            units=round(float(units), 3),
-        )
-        for symbol in symbols
-    ]
+        symbol = _gap_symbol(units, boundaries, config)
+    return ClassifiedRun(
+        kind=run.kind,
+        start_s=round(float(run.start_s), 6),
+        duration_s=round(float(run.duration_s), 6),
+        symbol=symbol,
+        units=round(float(units), 3),
+    )
 
 
-def _tone_symbol_candidates(
-    units: float,
-    boundaries: TimingBoundaries,
-    config,
-    *,
-    preferred_only: bool,
-) -> list[str]:
-    boundary = float(boundaries.dot_dash_units)
-    preferred = "." if units < boundary else "-"
-    if preferred_only or not bool(getattr(config, "flexible_timing", True)):
-        return [preferred]
-    ambiguity = float(getattr(config, "tone_ambiguity_units", 0.35))
-    if abs(units - boundary) <= ambiguity:
-        return [preferred, "-" if preferred == "." else "."]
-    return [preferred]
-
-
-def _gap_symbol_candidates(
-    units: float,
-    boundaries: TimingBoundaries,
-    config,
-    *,
-    preferred_only: bool,
-) -> list[str]:
+def _gap_symbol(units: float, boundaries: TimingBoundaries, config) -> str:
     element_letter = float(boundaries.element_letter_units)
     letter_word = float(boundaries.letter_word_units)
     session_gap = float(getattr(config, "session_gap_units", float(getattr(config, "default_word_gap_units", 7.0)) * 2.0))
     if units >= session_gap:
-        preferred = "session_gap"
-    elif units < element_letter:
-        preferred = "element_gap"
-    elif units < letter_word:
-        preferred = "letter_gap"
-    else:
-        preferred = "word_gap"
-    if preferred_only or not bool(getattr(config, "flexible_timing", True)):
-        return [preferred]
-
-    candidates = [preferred]
-    if preferred == "session_gap":
-        return candidates
-    ambiguity = float(getattr(config, "gap_ambiguity_units", 0.55))
-    if abs(units - element_letter) <= ambiguity:
-        _append_unique(candidates, "letter_gap" if preferred == "element_gap" else "element_gap")
-    if abs(units - letter_word) <= ambiguity:
-        _append_unique(candidates, "word_gap" if preferred == "letter_gap" else "letter_gap")
-
-    # Very hand-sent CW can have a squeezed word gap.  Do not globally turn all
-    # letter gaps into word gaps, but allow a second interpretation for the
-    # longest observed letter-like gaps when the word/letter boundary is poorly
-    # separated.  Timing quality will penalize this path if it is implausible.
-    squeezed_word_margin = float(getattr(config, "squeezed_word_gap_margin_units", 1.25))
-    if preferred == "letter_gap" and units >= max(element_letter + 0.25, letter_word - squeezed_word_margin):
-        _append_unique(candidates, "word_gap")
-    return candidates
-
-
-def _append_unique(values: list[str], value: str) -> None:
-    if value not in values:
-        values.append(value)
+        return "session_gap"
+    if units < element_letter:
+        return "element_gap"
+    if units < letter_word:
+        return "letter_gap"
+    return "word_gap"
 
 
 def _adaptive_dot_dash_boundary_units(runs: list[HardRun], unit_s: float, config) -> float:

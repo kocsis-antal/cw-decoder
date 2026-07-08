@@ -27,11 +27,10 @@ class SignalConfig:
     # the channel envelope's low/high energy clusters.
     signal_min_keying_separation: float = 1.25
 
-    # Optional signal-layer gates.  Defaults are intentionally permissive so
-    # plausible weak tracks are not lost before competing decoders/selection can
-    # inspect them.  Use smaller values for constrained live operation.
+    # Optional signal-layer quality gate.  Defaults are intentionally
+    # permissive so plausible weak tracks are not lost before competing
+    # decoders/selection can inspect them.
     signal_max_unknown_ratio: float = 1.0
-    signal_max_run_count: int = 10_000
 
 
 def validate_signal_config(config: SignalConfig) -> None:
@@ -59,8 +58,6 @@ def validate_signal_config(config: SignalConfig) -> None:
         raise ValueError("signal_min_keying_separation must not be negative")
     if not 0 <= config.signal_max_unknown_ratio <= 1:
         raise ValueError("signal_max_unknown_ratio must be in the [0, 1] range")
-    if config.signal_max_run_count < 1:
-        raise ValueError("signal_max_run_count must be positive")
 
 
 __all__ = ["SignalConfig", "validate_signal_config"]
