@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Iterable
 
-from cw.app.channel_output import ChannelOutput
+from cw.app.channel_output import ChannelOutput, channel_layer_info_to_dict
 from cw.decoder.tokens import tokens_from_dicts, tokens_to_dicts, tokens_to_text
 
 
@@ -16,6 +16,7 @@ def channel_output_to_dict(output: ChannelOutput) -> dict[str, Any]:
         "carrier_hz": _rounded_float(output.carrier_hz),
         "state": output.state,
         "tokens": tokens,
+        "layers": channel_layer_info_to_dict(output.layers),
     }
 
 
@@ -24,6 +25,8 @@ def channel_output_from_dict(payload: dict[str, Any]) -> ChannelOutput | None:
         return None
     tokens = tokens_from_dicts(payload.get("tokens") or ())
     stable_count = sum(1 for token in (payload.get("tokens") or []) if isinstance(token, dict) and token.get("stable"))
+    from cw.app.channel_output import channel_layer_info_from_dict
+
     return ChannelOutput(
         channel_id=int(payload.get("channel_id") or 0),
         carrier_hz=float(payload.get("carrier_hz") or 0.0),
@@ -31,6 +34,7 @@ def channel_output_from_dict(payload: dict[str, Any]) -> ChannelOutput | None:
         text=tokens_to_text(tokens),
         tokens=tokens,
         stable_token_count=stable_count,
+        layers=channel_layer_info_from_dict(payload.get("layers") or {}),
     )
 
 

@@ -92,14 +92,13 @@ def channel_debug_output_to_dict(output: ChannelDebugOutput) -> dict[str, Any]:
         payload["selection"] = {
             "selected_text": output.selection.selected_text,
             "kept_previous": output.selection.kept_previous,
-            "available_family_count": output.selection.available_family_count,
+            "available_track_count": output.selection.available_track_count,
             "groups": [
                 {
                     "text": group.text,
                     "unresolved_tokens": group.unresolved_tokens,
                     "support_count": group.support_count,
-                    "family_count": group.family_count,
-                    "family_support_score": _rounded_float(group.family_support_score),
+                    "support_score": _rounded_float(group.support_score),
                     "unknown_penalty_score": _rounded_float(group.unknown_penalty_score),
                     "final_score": _rounded_float(group.final_score),
                     "neighbor_stability": group.neighbor_stability,

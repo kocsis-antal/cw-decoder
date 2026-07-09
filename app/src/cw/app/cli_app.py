@@ -94,7 +94,6 @@ def _add_receiver_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-tracks", type=int, default=5)
     parser.add_argument("--channel-match-hz", "--bandwidth-hz", dest="channel_match_hz", type=float, default=40.0, help="normal same-channel tracking tolerance in Hz")
     parser.add_argument("--carrier-window-s", type=float, default=2.0)
-    parser.add_argument("--channel-window-s", type=float, default=8.0)
     parser.add_argument("--max-history-s", type=float, default=12.0)
     parser.add_argument("--peak-relative-threshold", type=float, default=0.05)
     parser.add_argument("--carrier-min-snr-db", type=float, default=14.0, help="minimum per-carrier spectral SNR for opening a channel")
@@ -102,8 +101,6 @@ def _add_receiver_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--peak-min-separation-hz", type=float, default=0.0, help=argparse.SUPPRESS)
     parser.add_argument("--channel-reacquire-hz", type=float, default=80.0, help="frequency distance used to reacquire the same channel")
     parser.add_argument("--no-alias-suppression", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--signal-threshold-ratios", default="0.25,0.30,0.35,0.42", help="comma-separated signal threshold ratios")
-    parser.add_argument("--signal-uncertainty-ratio", type=float, default=0.08)
     parser.add_argument("--signal-distribution-probabilities", default="0.70,0.80,0.90", help="comma-separated posterior acceptance probabilities for distribution-based signal tracks")
     parser.add_argument("--dot-dash-boundary-units", type=float, default=2.0)
     parser.add_argument("--no-adaptive-tone-thresholds", action="store_true", help="disable data-driven ti/ta boundary estimation")
@@ -113,17 +110,13 @@ def _add_receiver_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-element-letter-gap-units", type=float, default=2.8)
     parser.add_argument("--session-gap-units", type=float, default=14.0, help="gap length, in ti units, decoded as a session_gap token")
     parser.add_argument("--signal-max-cpm", type=float, default=200.0, help="maximum plausible CW speed in characters/minute; marks faster than this are treated as glitches, 0 disables")
-    parser.add_argument("--signal-min-keying-separation", type=float, default=1.25, help="minimum low/high envelope separability for accepting a channel as keyed CW")
+    parser.add_argument("--signal-max-continuous-mark-s", type=float, default=0.80, help="MARK runs longer than this are treated as UNKNOWN stuck tones; 0 disables")
+    parser.add_argument("--signal-min-keying-separation", type=float, default=1.25, help="minimum normalized low/high envelope separability for accepting a channel as keyed CW")
+    parser.add_argument("--signal-min-keying-contrast-db", type=float, default=10.0, help="minimum robust envelope on/off depth for accepting a channel as keyed CW")
     parser.add_argument("--signal-max-unknown-ratio", type=float, default=1.0)
     parser.add_argument("--decoder-max-unknown-ratio", type=float, default=0.20)
     parser.add_argument("--decoder-max-unknown-branches", type=int, default=256, help="maximum MARK/SPACE branches generated from UNKNOWN runs in one decoder track")
     parser.add_argument("--selection-min-support-count", type=int, default=1)
-    parser.add_argument("--selection-min-family-count", type=int, default=1)
-    parser.add_argument(
-        "--selection-candidate-families",
-        default="energy_distribution",
-        help="comma-separated analyzer families allowed to produce selected output; empty allows all families",
-    )
 
 
 def _add_output_options(parser: argparse.ArgumentParser) -> None:
@@ -162,7 +155,6 @@ def _build_streaming_config(args: argparse.Namespace) -> ProcessingConfig:
         max_tracks=args.max_tracks,
         channel_match_hz=args.channel_match_hz,
         carrier_window_s=args.carrier_window_s,
-        channel_window_s=args.channel_window_s,
         max_history_s=max_history_s,
         peak_relative_threshold=args.peak_relative_threshold,
         carrier_min_snr_db=args.carrier_min_snr_db,
@@ -171,8 +163,6 @@ def _build_streaming_config(args: argparse.Namespace) -> ProcessingConfig:
         channel_reacquire_hz=args.channel_reacquire_hz,
         decoder_max_unknown_ratio=args.decoder_max_unknown_ratio,
         decoder_max_unknown_branches=args.decoder_max_unknown_branches,
-        signal_threshold_ratios=_parse_float_csv(args.signal_threshold_ratios),
-        signal_uncertainty_ratio=args.signal_uncertainty_ratio,
         signal_distribution_acceptance_probabilities=_parse_float_csv(args.signal_distribution_probabilities),
         dot_dash_boundary_units=args.dot_dash_boundary_units,
         adaptive_tone_thresholds=not args.no_adaptive_tone_thresholds,
@@ -182,11 +172,11 @@ def _build_streaming_config(args: argparse.Namespace) -> ProcessingConfig:
         max_element_letter_gap_units=args.max_element_letter_gap_units,
         session_gap_units=args.session_gap_units,
         signal_max_cpm=args.signal_max_cpm,
+        signal_max_continuous_mark_s=args.signal_max_continuous_mark_s,
         signal_min_keying_separation=args.signal_min_keying_separation,
+        signal_min_keying_contrast_db=args.signal_min_keying_contrast_db,
         signal_max_unknown_ratio=args.signal_max_unknown_ratio,
         selection_min_support_count=args.selection_min_support_count,
-        selection_min_family_count=args.selection_min_family_count,
-        selection_candidate_families=_parse_str_csv(args.selection_candidate_families),
     )
 
 
@@ -221,8 +211,3 @@ def _parse_float_csv(value: str) -> tuple[float, ...]:
         return ()
     return tuple(float(part.strip()) for part in str(value).split(",") if part.strip())
 
-
-def _parse_str_csv(value: str) -> tuple[str, ...]:
-    if value is None or not str(value).strip():
-        return ()
-    return tuple(part.strip().lower() for part in str(value).split(",") if part.strip())

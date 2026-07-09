@@ -18,8 +18,12 @@ audio input
 The transcript logic is not a per-channel memory object.  It receives the
 currently selected token sequence and splits it into two parts:
 
-- stable tokens: safe to mark stable in JSON;
-- carried/tentative tokens: still part of the current uncertain tail.
+- stable tokens: safe to commit in JSON/UI;
+- carried/tentative tokens: retained audio context plus the current uncertain tail.
+
+A token kept as audio context is deliberately not marked stable in public output.
+It is present only so the next decode window has enough timing context; once a
+stable word/session gap is available, context never reaches back across that gap.
 
 The split also produces an optional absolute audio trim time.  The app feeds
 that trim point back into receiving, so old stable audio does not need to be
@@ -35,6 +39,17 @@ The receiving layer keeps separate controls for separate concepts:
 - `channel_reacquire_hz`: wider tolerance for reacquiring a recently missing channel.
 
 These are intentionally not aliases of each other.
+
+## Receiving window trimming
+
+Receiving does not use an independent per-channel rolling text/decode window.
+The app-level stable-prefix split is the only normal source of channel audio
+trimming: it can choose a Morse-token boundary and keep explicit context
+characters.  A blind time window can cut into a retained character and make the
+next decode worse than the previous one.
+
+The only hard audio bound is `max_history_s`, the shared ring-buffer size.  It
+is a memory/CPU safety limit, not a transcript or GUI retention setting.
 
 ## Public output
 
@@ -63,14 +78,17 @@ Selection is stateless and ranks only the current decoded candidates.  It does
 not use text semantics, gap-length rescoring, signal separability, or previous
 winners.
 
+The runtime signal path now has a single activity model: `energy_distribution`.
+Its configured posterior acceptance probabilities create several variants, and
+selection rewards agreement between those variants directly.
+
 The winner score is intentionally small:
 
-- one vote per analyzer family, so multiple threshold variants from the same family do not outvote another independent family;
-- a small penalty for unresolved/unknown tokens. Unknowns are not an automatic veto.
+- `support_count`: how many energy-distribution variants produced the same best token stream;
+- a small penalty for unresolved/unknown tokens. Unknowns are not an automatic veto;
+- `neighbor_stability`: diagnostic tie-break help when adjacent probability variants agree.
 
-Raw `support_count` is still emitted in debug output, but it is diagnostic data;
-it is not the primary ranking vote. Debug groups also include
-`family_support_score`, `unknown_penalty_score`, and `final_score`.
+Debug groups include `support_score`, `unknown_penalty_score`, and `final_score`.
 
 ## Tests
 

@@ -129,3 +129,30 @@ def test_spectral_carrier_detection_rejects_noise_only_relative_peaks() -> None:
 
     assert loose
     assert gated == ()
+
+
+def test_receiving_trims_only_at_app_safe_trim_boundary() -> None:
+    source = _tone_source(duration_s=12.0)
+    config = ProcessingConfig(
+        max_tracks=1,
+        min_track_hits=1,
+        emit_interval_s=0.1,
+        max_history_s=20.0,
+    )
+    receiver = Receiver(source.sample_rate, config)
+    iterator = iter(source)
+
+    first = receiver.push(next(iterator))
+    channel_id = first.channels[0].channel_id
+
+    # This represents the app/transcript saying: audio before 2.0 s is safe to
+    # drop, but 2.0 s itself is still needed as decoder context.
+    receiver.trim_channel_audio_before(channel_id, before_s=2.0)
+
+    for block in iterator:
+        last = receiver.push(block)
+
+    channel = next(channel for channel in last.channels if channel.channel_id == channel_id)
+
+    assert channel.start_s == 2.0
+    assert channel.end_s > 10.0

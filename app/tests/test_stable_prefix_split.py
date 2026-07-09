@@ -45,7 +45,7 @@ def test_stable_prefix_split_keeps_trailing_active_tokens_tentative_and_returns_
     split = split_transcript_tokens(
         _tokens("CQ DE", start=10.0, step=0.4),
         active=True,
-        config=TranscriptConfig(hold_chars=2),
+        config=TranscriptConfig(hold_chars=2, audio_context_chars=0),
     )
 
     assert tokens_to_text(split.stable_tokens) == "CQ"
@@ -58,12 +58,38 @@ def test_split_winner_outputs_absolute_token_times_and_receiver_trim_point() -> 
     channel = _active_channel(start_s=10.0, end_s=13.9)
     winner = _winner("CQ DE", time_s=13.9, tokens=_tokens("CQ DE", start=0.0, step=0.4))
 
-    split_winner, trim_before_s = split_winner_tokens(channel, winner, ProcessingConfig(stable_prefix_hold_chars=2))
+    split_winner, trim_before_s = split_winner_tokens(channel, winner, ProcessingConfig(stable_prefix_hold_chars=2, stable_audio_context_chars=0))
 
     assert tokens_to_text(split_winner.tokens[: split_winner.stable_token_count]) == "CQ"
     assert split_winner.tokens[0].start_s == 10.0
     assert trim_before_s is not None
 
+
+
+def test_audio_context_tokens_are_carried_not_marked_stable_inside_a_word() -> None:
+    split = split_transcript_tokens(
+        _tokens("CQCQDE", start=18.0, step=0.2),
+        active=False,
+        config=TranscriptConfig(hold_chars=0, fallback_after_chars=3, audio_context_chars=2),
+    )
+
+    assert tokens_to_text(split.stable_tokens) == "CQCQ"
+    assert tokens_to_text(split.carried_tokens).startswith("DE")
+    assert split.stable_token_count == len(split.stable_tokens)
+    assert split.trim_before_s == split.carried_tokens[0].start_s
+
+
+def test_audio_context_does_not_cross_a_stable_word_gap() -> None:
+    split = split_transcript_tokens(
+        _tokens("DELTA FOR", start=18.0, step=0.2),
+        active=True,
+        config=TranscriptConfig(hold_chars=3, audio_context_chars=2),
+    )
+
+    assert tokens_to_text(split.stable_tokens) == "DELTA"
+    assert tokens_to_text(split.carried_tokens).startswith("FOR")
+    assert split.trim_before_s is not None
+    assert split.trim_before_s == split.carried_tokens[0].start_s
 
 def test_safe_commit_uses_latest_non_empty_word_boundary_and_ignores_leading_separator() -> None:
     assert safe_commit_prefix_len((gap_token("word_gap"),) + _tokens("CEUCQCD"), 8, fallback_after_chars=6) == 4
@@ -104,3 +130,23 @@ def test_audio_context_never_crosses_last_session_gap() -> None:
     )
 
     assert trim_time_from_stable_tokens(tokens, audio_context_chars=5) == 1.2
+
+
+def test_history_pressure_forces_stable_prefix_at_token_boundary_without_character_cut() -> None:
+    tokens = (
+        char_token("C", start_s=0.0, end_s=0.2),
+        char_token("Q", start_s=0.3, end_s=0.5),
+        char_token("C", start_s=0.6, end_s=0.8),
+        char_token("Q", start_s=0.9, end_s=1.1),
+    )
+
+    split = split_transcript_tokens(
+        tokens,
+        active=True,
+        config=TranscriptConfig(hold_chars=3, fallback_after_chars=100, audio_context_chars=2),
+        force_trim_before_s=0.75,
+    )
+
+    assert tokens_to_text(split.stable_tokens) == "CQC"
+    assert tokens_to_text(split.carried_tokens) == "Q"
+    assert split.trim_before_s == 0.8

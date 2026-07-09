@@ -12,7 +12,6 @@ class ReceivingConfig:
     tracker_hop_ms: float | None = None
     max_history_s: float | None = 12.0
     carrier_window_s: float = 2.0
-    channel_window_s: float = 8.0
     history_margin_s: float = 0.25
     emit_interval_s: float = 0.50
 
@@ -82,8 +81,6 @@ def validate_receiving_config(config: ReceivingConfig) -> None:
         raise ValueError("max_history_s must be positive when set")
     if config.carrier_window_s <= 0:
         raise ValueError("carrier_window_s must be positive")
-    if config.channel_window_s <= 0:
-        raise ValueError("channel_window_s must be positive")
     if config.history_margin_s < 0:
         raise ValueError("history_margin_s must not be negative")
     if config.emit_interval_s <= 0:

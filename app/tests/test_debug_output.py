@@ -27,7 +27,7 @@ def test_public_json_stays_minimal_when_debug_exists() -> None:
     assert chunk.outputs
     assert chunk.debug_outputs
     public_payload = json.loads(channel_output_to_json(chunk.outputs[0]))
-    assert set(public_payload) == {"channel_id", "carrier_hz", "state", "tokens"}
+    assert set(public_payload) == {"channel_id", "carrier_hz", "state", "tokens", "layers"}
 
 
 def test_debug_json_contains_signal_decoder_and_selection_details() -> None:
@@ -41,7 +41,7 @@ def test_debug_json_contains_signal_decoder_and_selection_details() -> None:
         state=ChannelState.ACTIVE,
     )
     track = SignalTrack(
-        analyzer="threshold_activity:threshold=0.30",
+        analyzer="energy_distribution:p=0.80",
         runs=(
             SignalRun(SignalState.MARK, 0.08),
             SignalRun(SignalState.UNKNOWN, 0.03),
@@ -57,7 +57,6 @@ def test_debug_json_contains_signal_decoder_and_selection_details() -> None:
                 text="CQ",
                 unresolved_tokens=0,
                 support_count=2,
-                family_count=1,
                 neighbor_stability=1,
                 selected=True,
                 paths=(SelectionPathDebug(analyzer=track.analyzer, decoder="run_decoder", unresolved_tokens=0),),
@@ -110,7 +109,6 @@ def test_debug_view_formats_selection_reason() -> None:
                         "text": "CQ",
                         "unresolved_tokens": 0,
                         "support_count": 3,
-                        "family_count": 2,
                         "neighbor_stability": 1,
                         "selected": True,
                     }
@@ -123,4 +121,4 @@ def test_debug_view_formats_selection_reason() -> None:
 
     assert rendered[0].startswith("DEBUG t=1.25s ch4 702.0Hz active selected=\"CQ\"")
     assert any("energy_distribution:p=0.80" in item for item in rendered)
-    assert any('bad=0 support=3 families=2 neighbors=1' in item for item in rendered)
+    assert any('bad=0 support=3 neighbors=1' in item for item in rendered)

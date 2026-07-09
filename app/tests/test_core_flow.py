@@ -32,7 +32,7 @@ def test_channel_output_json_roundtrip() -> None:
     assert payload["channel_id"] == 3
     assert payload["carrier_hz"] == 702.5
     assert payload["state"] == "active"
-    assert set(payload) == {"channel_id", "carrier_hz", "state", "tokens"}
+    assert set(payload) == {"channel_id", "carrier_hz", "state", "tokens", "layers"}
     assert payload["tokens"][2] == {"kind": "word_gap", "stable": True}
     parsed = _channel_output_from_dict(payload)
     assert parsed is not None
@@ -83,7 +83,7 @@ def test_signal_track_has_only_signal_runs_and_unknown_time_ratio() -> None:
     assert not hasattr(track, "metadata")
 
 
-def test_signal_layer_can_generate_multiple_tracks_from_channel() -> None:
+def test_signal_layer_can_generate_distribution_tracks_from_channel() -> None:
     sample_rate = 8000
     t = np.arange(sample_rate, dtype=np.float32) / sample_rate
     keying = ((t % 0.20) < 0.10).astype(np.float32)
@@ -91,18 +91,12 @@ def test_signal_layer_can_generate_multiple_tracks_from_channel() -> None:
     source = ArrayAudioSource(samples, sample_rate, block_ms=1000.0)
     receiver = Receiver(sample_rate, ProcessingConfig(max_tracks=1, min_track_hits=1, emit_interval_s=0.1))
     chunk = receiver.push(next(iter(source)))
-    config = ProcessingConfig(
-        signal_threshold_ratios=(0.25, 0.35, 0.45),
-        signal_distribution_acceptance_probabilities=(0.70, 0.90),
-    )
+    config = ProcessingConfig(signal_distribution_acceptance_probabilities=(0.70, 0.90))
     bank = SignalSegmenterBank.default(config)
     tracks = bank.segment_channel(chunk.channels[0])
 
-    assert len(tracks) == 5
+    assert len(tracks) == 2
     assert {track.analyzer for track in tracks} == {
-        "threshold_activity:threshold=0.25",
-        "threshold_activity:threshold=0.35",
-        "threshold_activity:threshold=0.45",
         "energy_distribution:p=0.70",
         "energy_distribution:p=0.90",
     }
@@ -114,7 +108,7 @@ def test_signal_layer_can_generate_multiple_tracks_from_channel() -> None:
     assert all(run.duration_s > 0 for track in tracks for run in track.runs)
 
 
-def test_signal_segmenter_uses_signal_thresholds_not_decoder_thresholds() -> None:
+def test_signal_segmenter_uses_distribution_probabilities() -> None:
     sample_rate = 8000
     t = np.arange(sample_rate, dtype=np.float32) / sample_rate
     keying = ((t % 0.20) < 0.10).astype(np.float32)
@@ -123,42 +117,11 @@ def test_signal_segmenter_uses_signal_thresholds_not_decoder_thresholds() -> Non
     receiver = Receiver(sample_rate, ProcessingConfig(max_tracks=1, min_track_hits=1, emit_interval_s=0.1))
     chunk = receiver.push(next(iter(source)))
 
-    config = ProcessingConfig(
-        signal_threshold_ratios=(0.33, 0.44),
-        signal_distribution_acceptance_probabilities=(0.80,),
-    )
+    config = ProcessingConfig(signal_distribution_acceptance_probabilities=(0.80,))
 
     tracks = SignalSegmenterBank.default(config).segment_channel(chunk.channels[0])
 
-    threshold_tracks = [track.analyzer for track in tracks if track.analyzer.startswith("threshold_activity:")]
-    distribution_tracks = [track.analyzer for track in tracks if track.analyzer.startswith("energy_distribution:")]
-
-    assert threshold_tracks == [
-        "threshold_activity:threshold=0.33",
-        "threshold_activity:threshold=0.44",
-    ]
-    assert distribution_tracks == ["energy_distribution:p=0.80"]
-
-
-
-def test_threshold_activity_states_can_emit_unknown_inside_uncertainty_band() -> None:
-    from cw.signal.segmenters import _threshold_activity_states
-
-    states = _threshold_activity_states(
-        np.asarray([0.10, 0.45, 0.50, 0.55, 0.90]),
-        threshold=0.50,
-        noise=0.0,
-        signal=1.0,
-        uncertainty_ratio=0.10,
-    )
-
-    assert states == [
-        SignalState.SPACE,
-        SignalState.UNKNOWN,
-        SignalState.UNKNOWN,
-        SignalState.UNKNOWN,
-        SignalState.MARK,
-    ]
+    assert [track.analyzer for track in tracks] == ["energy_distribution:p=0.80"]
 
 def test_distribution_signal_segmenter_uses_energy_distribution() -> None:
     from cw.receiving.models import ChannelSignal, ChannelState
@@ -341,6 +304,51 @@ def test_dashboard_appends_stable_json_tokens_instead_of_overwriting_with_audio_
     assert "CQ DE" in rendered
     assert "Q DE" in rendered
 
+
+def test_dashboard_exact_overlap_guard_is_only_idempotence_not_context_dedupe() -> None:
+    from cw.app.channel_output import append_non_overlapping_tokens
+    from cw.decoder.tokens import tokens_to_text
+
+    committed = (
+        char_token("C", start_s=1.0, end_s=1.2),
+        char_token("Q", start_s=1.3, end_s=1.5),
+    )
+    incoming = (
+        char_token("Q", start_s=1.3, end_s=1.5),
+        gap_token("word_gap", start_s=1.5, end_s=1.7),
+        char_token("D", start_s=1.7, end_s=1.9),
+        char_token("E", start_s=2.0, end_s=2.2),
+    )
+
+    merged = append_non_overlapping_tokens(committed, incoming)
+
+    assert tokens_to_text(merged) == "CQ DE"
+
+
+def test_dashboard_does_not_hide_context_commit_bug_by_time_deduping() -> None:
+    from cw.app.channel_output import append_non_overlapping_tokens
+    from cw.decoder.tokens import tokens_to_text
+
+    committed = (
+        char_token("D", start_s=18.01, end_s=18.465),
+        char_token("E", start_s=18.69, end_s=18.755),
+        char_token("L", start_s=19.015, end_s=19.605),
+        char_token("T", start_s=19.855, end_s=20.05),
+        char_token("A", start_s=20.285, end_s=20.61),
+        gap_token("word_gap", start_s=20.61, end_s=21.02),
+    )
+    incoming = (
+        char_token("T", start_s=19.855, end_s=20.05),
+        char_token("A", start_s=20.285, end_s=20.61),
+        char_token("F", start_s=21.02, end_s=21.605),
+        char_token("O", start_s=21.79, end_s=22.515),
+        char_token("R", start_s=22.725, end_s=23.185),
+    )
+
+    merged = append_non_overlapping_tokens(committed, incoming)
+
+    assert tokens_to_text(merged) == "DELTA TAFOR"
+
 def test_channel_output_view_ignores_non_public_json_fields() -> None:
     from io import StringIO
     from cw.ui.dashboard import iter_formatted_jsonl
@@ -493,3 +501,49 @@ def test_signal_speed_gate_keeps_200_cpm_dot_duration() -> None:
     cleaned = _clean_signal_runs(runs, ProcessingConfig(signal_max_cpm=200.0))
 
     assert cleaned == runs
+
+
+
+def test_signal_layer_marks_stuck_tone_as_unknown() -> None:
+    from cw.signal.segmenters import _mark_stuck_tones_unknown
+
+    config = ProcessingConfig(signal_max_continuous_mark_s=0.8)
+    runs = [
+        SignalRun(SignalState.SPACE, 0.12),
+        SignalRun(SignalState.MARK, 1.60),
+        SignalRun(SignalState.SPACE, 0.20),
+        SignalRun(SignalState.MARK, 0.22),
+    ]
+
+    cleaned = _mark_stuck_tones_unknown(runs, config)
+
+    assert cleaned[1].state is SignalState.UNKNOWN
+    assert cleaned[1].duration_s == 1.60
+    assert cleaned[3].state is SignalState.MARK
+
+
+def test_keying_gate_rejects_low_contrast_ripple_even_when_clusters_are_separable() -> None:
+    from cw.signal.segmenters import _has_keyed_cw_activity, _keying_contrast_db, _keying_separation
+
+    # A nearly steady tone can form two very tight low/high clusters if its
+    # envelope ripples a little, so normalized separation alone is misleading.
+    energy = np.asarray(([1.0] * 20 + [1.5] * 20) * 3, dtype=np.float64)
+
+    assert _keying_separation(energy) > 1.25
+    assert _keying_contrast_db(energy) < 10.0
+    assert not _has_keyed_cw_activity(energy, ProcessingConfig())
+
+
+def test_keying_gate_accepts_real_on_off_envelope_depth() -> None:
+    from cw.signal.segmenters import _has_keyed_cw_activity, _keying_contrast_db
+
+    energy = np.asarray(([0.001] * 20 + [1.0] * 20) * 3, dtype=np.float64)
+
+    assert _keying_contrast_db(energy) >= 10.0
+    assert _has_keyed_cw_activity(energy, ProcessingConfig())
+
+
+def test_dashboard_text_column_keeps_the_latest_tail_when_it_overflows() -> None:
+    from cw.ui.dashboard import _tail_ellipsize
+
+    assert _tail_ellipsize("ABCDEFGHIJKLMNOPQRSTUVWXYZ", 10) == "…RSTUVWXYZ"

@@ -3,15 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from math import isfinite
 
+from cw.decoder.tokens import DecodeToken, token_signature
+from cw.selection.config import SelectionConfig
 from cw.selection.debug import (
     ChannelSelectionDebug,
     SelectionDebugChunk,
     SelectionGroupDebug,
     SelectionPathDebug,
 )
-from cw.selection.config import SelectionConfig
 from cw.selection.models import ChannelDecodedTexts, ChannelWinner, SelectionChunk, SelectionInput
-from cw.decoder.tokens import DecodeToken, token_signature
 
 
 @dataclass(frozen=True)
@@ -23,6 +23,7 @@ class _DecodedPath:
     decoder: str
     encounter_order: int
     unknown_ratio: float = 0.0
+    answer_rank: int = 0
 
 
 @dataclass(frozen=True)
@@ -45,25 +46,21 @@ class _TextGroup:
 class _GroupScore:
     unresolved_tokens: int
     support_count: int
-    family_count: int
-    family_support_score: float
+    support_score: float
     unknown_penalty_score: float
     final_score: float
     neighbor_stability: int
     encounter_order: int
 
-    def ranking_tuple(self) -> tuple[float, int, int, int, int]:
+    def ranking_tuple(self) -> tuple[float, int, int, int]:
         """Higher is better, except unresolved tokens which is negated.
 
-        Selection intentionally does not rank by raw path count first.  Several
-        threshold variants from one analyzer family are correlated evidence, not
-        independent votes.  The primary score is therefore family-weighted
-        support with a small unknown-token penalty.
+        With a single activity model in the normal runtime path, selection
+        rewards agreement between its probability variants directly.
         """
 
         return (
             self.final_score,
-            self.family_count,
             -self.unresolved_tokens,
             self.neighbor_stability,
             self.support_count,
@@ -90,7 +87,7 @@ class ChannelResultSelector:
     """Chooses one current decoded token stream per channel.
 
     The selector is intentionally stateless.  It ranks only the current
-    uncommitted candidates provided by the application layer.  Persistent text,
+    candidates provided by the application layer.  Persistent text,
     stable/tentative marking and receiver audio trimming belong to the app, not
     to selection.
     """
@@ -121,7 +118,7 @@ class ChannelResultSelector:
     def _select_channel(self, channel: ChannelDecodedTexts, *, time_s: float) -> _SelectionOutcome:
         groups = _groups_by_text(channel)
         analyzer_infos = _analyzer_infos(channel)
-        available_family_count = len({_analyzer_family(track.analyzer) for track in channel.tracks if not track.rejected})
+        available_track_count = len([track for track in channel.tracks if not track.rejected])
         if not groups:
             return _SelectionOutcome(
                 winner=None,
@@ -130,7 +127,7 @@ class ChannelResultSelector:
                     "",
                     False,
                     [],
-                    available_family_count=available_family_count,
+                    available_track_count=available_track_count,
                 ),
             )
 
@@ -144,7 +141,7 @@ class ChannelResultSelector:
                     "",
                     False,
                     scored,
-                    available_family_count=available_family_count,
+                    available_track_count=available_track_count,
                 ),
             )
         selected = _best_group(eligible_scored)
@@ -156,7 +153,7 @@ class ChannelResultSelector:
                     "",
                     False,
                     scored,
-                    available_family_count=available_family_count,
+                    available_track_count=available_track_count,
                 ),
             )
 
@@ -175,7 +172,7 @@ class ChannelResultSelector:
                 selected.text,
                 False,
                 scored,
-                available_family_count=available_family_count,
+                available_track_count=available_track_count,
             ),
         )
 
@@ -185,7 +182,7 @@ def _groups_by_text(channel: ChannelDecodedTexts) -> dict[tuple[tuple[str, str],
     encounter_order = 0
     for track in channel.tracks:
         for result in track.results:
-            for answer in result.answers:
+            for answer_rank, answer in enumerate(result.answers):
                 text = answer.text.strip()
                 if not text:
                     continue
@@ -204,6 +201,7 @@ def _groups_by_text(channel: ChannelDecodedTexts) -> dict[tuple[tuple[str, str],
                         decoder=result.decoder,
                         encounter_order=encounter_order,
                         unknown_ratio=max(0.0, float(track.unknown_ratio)),
+                        answer_rank=answer_rank,
                     )
                 )
                 encounter_order += 1
@@ -211,38 +209,24 @@ def _groups_by_text(channel: ChannelDecodedTexts) -> dict[tuple[tuple[str, str],
 
 
 def _score_group(group: _TextGroup, analyzer_infos: dict[str, _AnalyzerInfo], config: SelectionConfig) -> _ScoredGroup:
-    selectable_paths = tuple(path for path in group.paths if _family_is_selectable(path.analyzer, config))
-    if not selectable_paths:
-        all_best = _best_paths_by_unresolved(tuple(group.paths))
-        score = _zero_score(group.encounter_order)
-        return _ScoredGroup(
-            text=group.text,
-            tokens=group.tokens,
-            best_paths=all_best,
-            score=score,
-            eligible=False,
-            rejection_reason="selection_family_not_allowed",
-        )
-
-    best_paths = _best_paths_by_unresolved(selectable_paths)
+    paths = tuple(group.paths)
+    best_paths = _best_paths_by_unresolved(paths)
     min_unresolved = min(path.unresolved_tokens for path in best_paths)
-    support_count = len(best_paths)
-    families = {_analyzer_family(path.analyzer) for path in best_paths}
-    family_support_score = _family_weighted_support(best_paths)
+    support_count = len({path.analyzer for path in best_paths})
+    support_score = sum(_answer_rank_weight(path.answer_rank) for path in best_paths)
     unknown_penalty_score = _unknown_penalty(min_unresolved)
-    final_score = family_support_score - unknown_penalty_score
+    final_score = support_score - unknown_penalty_score
     neighbor_stability = _neighbor_stability(list(best_paths), analyzer_infos)
     score = _GroupScore(
         unresolved_tokens=min_unresolved,
         support_count=support_count,
-        family_count=len(families),
-        family_support_score=family_support_score,
+        support_score=support_score,
         unknown_penalty_score=unknown_penalty_score,
         final_score=final_score,
         neighbor_stability=neighbor_stability,
         encounter_order=group.encounter_order,
     )
-    eligible, reason = _eligibility(best_paths, score, config)
+    eligible, reason = _eligibility(score, config)
     return _ScoredGroup(
         text=group.text,
         tokens=group.tokens,
@@ -253,53 +237,26 @@ def _score_group(group: _TextGroup, analyzer_infos: dict[str, _AnalyzerInfo], co
     )
 
 
-
-
 def _best_paths_by_unresolved(paths: tuple[_DecodedPath, ...]) -> tuple[_DecodedPath, ...]:
     min_unresolved = min(path.unresolved_tokens for path in paths)
     return tuple(path for path in paths if path.unresolved_tokens == min_unresolved)
 
 
-def _zero_score(encounter_order: int) -> _GroupScore:
-    return _GroupScore(
-        unresolved_tokens=0,
-        support_count=0,
-        family_count=0,
-        family_support_score=0.0,
-        unknown_penalty_score=0.0,
-        final_score=0.0,
-        neighbor_stability=0,
-        encounter_order=encounter_order,
-    )
-
-
-def _family_is_selectable(analyzer: str, config: SelectionConfig) -> bool:
-    allowed = tuple(family.strip() for family in config.selection_candidate_families if family.strip())
-    return not allowed or _analyzer_family(analyzer) in set(allowed)
-
-
-def _family_weighted_support(paths: tuple[_DecodedPath, ...]) -> float:
-    """Return one vote per analyzer family.
-
-    Variants of the same analyzer family are correlated, so they must not
-    outvote another family simply because that family has more threshold values.
-    """
-
-    return float(len({_analyzer_family(path.analyzer) for path in paths}))
+def _answer_rank_weight(answer_rank: int) -> float:
+    # Decoder answers are already sorted by timing quality.  A lower-ranked
+    # alternative is useful as weak support, but it must not beat a top answer
+    # merely because it appears as a fallback under several probability variants.
+    return 1.0 / float(max(1, int(answer_rank) + 1))
 
 
 def _unknown_penalty(unresolved_tokens: int) -> float:
-    # Keep this deliberately small: unknowns are a ranking penalty, not an
-    # automatic veto.  A result supported by multiple independent families may
-    # still beat a clean result supported by only one family.
+    # Unknowns are a ranking penalty, not an automatic veto.
     return 0.35 * max(0, int(unresolved_tokens))
 
 
-def _eligibility(best_paths: tuple[_DecodedPath, ...], score: _GroupScore, config: SelectionConfig) -> tuple[bool, str]:
+def _eligibility(score: _GroupScore, config: SelectionConfig) -> tuple[bool, str]:
     if score.support_count < config.selection_min_support_count:
         return False, f"support_count<{config.selection_min_support_count}"
-    if score.family_count < config.selection_min_family_count:
-        return False, f"family_count<{config.selection_min_family_count}"
     return True, ""
 
 
@@ -327,15 +284,14 @@ def _selection_debug(
     kept_previous: bool,
     scored: list[_ScoredGroup],
     *,
-    available_family_count: int,
+    available_track_count: int,
 ) -> ChannelSelectionDebug:
     groups = tuple(
         SelectionGroupDebug(
             text=group.text,
             unresolved_tokens=group.score.unresolved_tokens,
             support_count=group.score.support_count,
-            family_count=group.score.family_count,
-            family_support_score=group.score.family_support_score,
+            support_score=group.score.support_score,
             unknown_penalty_score=group.score.unknown_penalty_score,
             final_score=group.score.final_score,
             neighbor_stability=group.score.neighbor_stability,
@@ -358,7 +314,7 @@ def _selection_debug(
         channel_id=channel_id,
         selected_text=selected_text,
         kept_previous=False,
-        available_family_count=available_family_count,
+        available_track_count=available_track_count,
         groups=groups,
     )
 

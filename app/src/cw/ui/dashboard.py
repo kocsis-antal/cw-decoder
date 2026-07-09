@@ -30,6 +30,7 @@ class _ChannelRow:
     text: str = ""
     committed_tokens: tuple = ()
     tentative_tokens: tuple = ()
+    layers: object | None = None
     last_seen_s: float = 0.0
     last_text_s: float = 0.0
 
@@ -82,6 +83,7 @@ class HumanDashboardRenderer:
 
         row = self._row_for(output)
         row.state = output.state or row.state or "active"
+        row.layers = output.layers
         row.last_seen_s = self._current_time_s
         text = self._update_row_text(row, output)
         if text:
@@ -159,9 +161,10 @@ class HumanDashboardRenderer:
         width = _dashboard_width()
         active_rows = [row for row in self._rows.values() if row.state != "dropped"]
         lines = [f"CW live monitor   t={_format_duration(self._current_time_s)}   channels={len(active_rows)}", ""]
-        text_width = max(10, width - 38)
-        lines.append(_fit_columns([("ch", 4), ("freq", 10), ("state", 10), ("age", 7), ("text", text_width)]))
-        lines.append(_fit_columns([("-" * 4, 4), ("-" * 10, 10), ("-" * 10, 10), ("-" * 7, 7), ("-" * text_width, text_width)]))
+        layer_width = 30
+        text_width = max(10, width - 70)
+        lines.append(_fit_columns([("ch", 4), ("freq", 10), ("state", 10), ("age", 7), ("layers", layer_width), ("text", text_width)]))
+        lines.append(_fit_columns([("-" * 4, 4), ("-" * 10, 10), ("-" * 10, 10), ("-" * 7, 7), ("-" * layer_width, layer_width), ("-" * text_width, text_width)]))
         visible_rows = sorted(active_rows, key=lambda row: row.carrier_hz)[: self._max_rows]
         if not visible_rows:
             lines.append("listening... no confirmed CW channel yet")
@@ -174,6 +177,7 @@ class HumanDashboardRenderer:
                             (_format_carrier(row.carrier_hz), 10),
                             (row.state, 10),
                             (f"{self._row_age_s(row):4.1f}s", 7),
+                            (_format_layers(row.layers), layer_width),
                             (_display_text(row), text_width),
                         ]
                     )
@@ -255,6 +259,22 @@ def _use_ansi_dashboard(output_stream: TextIO) -> bool:
     return True
 
 
+def _format_layers(layers: object | None) -> str:
+    if layers is None:
+        return "rx=- sig=- dec=- sel=-"
+    audio_s = getattr(layers, "receiving_audio_s", 0.0) or 0.0
+    tracks = getattr(layers, "signal_tracks", 0) or 0
+    unknown = getattr(layers, "signal_best_unknown_ratio", None)
+    answers = getattr(layers, "decoder_answers", 0) or 0
+    support = getattr(layers, "selection_support", 0) or 0
+    groups = getattr(layers, "selection_groups", 0) or 0
+    if unknown is None:
+        sig = f"sig{tracks}"
+    else:
+        sig = f"sig{tracks}/u{float(unknown):.2f}"
+    return f"rx{float(audio_s):.1f}s {sig} dec{int(answers)} sel{int(support)}/{int(groups)}"
+
+
 def _display_text(row: _ChannelRow) -> str:
     if row.text:
         return row.text
@@ -286,12 +306,14 @@ def _format_duration(seconds: float) -> str:
 
 def _fit_columns(columns: list[tuple[str, int]]) -> str:
     parts: list[str] = []
+    last_index = len(columns) - 1
     for index, (value, width) in enumerate(columns):
         width = max(1, width)
-        text = _ellipsize(str(value), width)
-        if index == len(columns) - 1:
+        if index == last_index:
+            text = _tail_ellipsize(str(value), width)
             parts.append(text)
         else:
+            text = _ellipsize(str(value), width)
             parts.append(text.ljust(width))
     return " ".join(parts).rstrip()
 
@@ -303,6 +325,15 @@ def _ellipsize(value: str, width: int) -> str:
     if width <= 1:
         return "…"[:width]
     return value[: width - 1] + "…"
+
+
+def _tail_ellipsize(value: str, width: int) -> str:
+    value = value.replace("\n", " ")
+    if len(value) <= width:
+        return value
+    if width <= 1:
+        return "…"[:width]
+    return "…" + value[-(width - 1) :]
 
 
 __all__ = [

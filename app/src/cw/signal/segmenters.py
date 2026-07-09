@@ -23,41 +23,6 @@ class _EnergyFrames:
     hop_s: float
 
 
-class ThresholdSignalSegmenter:
-    """Turns one active channel audio window into several threshold-based tracks."""
-
-    name = "threshold_activity"
-
-    def __init__(self, config: SignalConfig) -> None:
-        self.config = config
-
-    def segment(self, channel: ChannelSignal) -> tuple[SignalTrack, ...]:
-        frames = _energy_frames(channel, self.config)
-        if frames is None:
-            return ()
-        noise = float(np.percentile(frames.energy, 10))
-        signal = float(np.percentile(frames.energy, 95))
-        tracks: list[SignalTrack] = []
-        for ratio in self.config.signal_threshold_ratios:
-            threshold = noise + (signal - noise) * ratio
-            activity = _threshold_activity_states(
-                frames.energy,
-                threshold=threshold,
-                noise=noise,
-                signal=signal,
-                uncertainty_ratio=self.config.signal_uncertainty_ratio,
-            )
-            runs = _clean_signal_runs(_runs_from_activity_states(activity, frames.hop_s), self.config)
-            tracks.append(
-                SignalTrack(
-                    analyzer=f"{self.name}:threshold={ratio:.2f}",
-                    runs=tuple(runs),
-                    unknown_ratio=_unknown_ratio_from_runs(runs),
-                )
-            )
-        return tuple(tracks)
-
-
 class DistributionSignalSegmenter:
     """Segments activity from the channel's own energy distribution.
 
@@ -107,7 +72,7 @@ class SignalSegmenterBank:
 
     @classmethod
     def default(cls, config: SignalConfig) -> "SignalSegmenterBank":
-        return cls((ThresholdSignalSegmenter(config), DistributionSignalSegmenter(config)))
+        return cls((DistributionSignalSegmenter(config),))
 
     def segment_channel(self, channel: ChannelSignal) -> tuple[SignalTrack, ...]:
         tracks: list[SignalTrack] = []
@@ -148,32 +113,6 @@ def _energy_frames(channel: ChannelSignal, config: SignalConfig) -> _EnergyFrame
     if not _has_keyed_cw_activity(energy, config):
         return None
     return _EnergyFrames(energy=energy, hop_s=config.signal_hop_ms / 1000)
-
-
-def _threshold_activity_states(
-    energy: np.ndarray,
-    *,
-    threshold: float,
-    noise: float,
-    signal: float,
-    uncertainty_ratio: float,
-) -> list[SignalState]:
-    if signal <= noise:
-        return [SignalState.UNKNOWN for _ in energy]
-    # A narrow uncertainty band avoids pretending that weak/fading edges are
-    # clean MARK/SPACE decisions.  The decoder can later decide how to handle
-    # UNKNOWN within Morse timing.
-    margin = max((signal - noise) * uncertainty_ratio, 1e-12)
-    states: list[SignalState] = []
-    for value in energy:
-        value = float(value)
-        if value >= threshold + margin:
-            states.append(SignalState.MARK)
-        elif value <= threshold - margin:
-            states.append(SignalState.SPACE)
-        else:
-            states.append(SignalState.UNKNOWN)
-    return states
 
 
 def _fit_two_component_log_energy_model(energy: np.ndarray, *, max_iterations: int) -> _DistributionModel | None:
@@ -297,7 +236,20 @@ def _clean_signal_runs(runs: list[SignalRun], config: SignalConfig) -> list[Sign
         else run
         for run in cleaned
     ]
+    cleaned = _mark_stuck_tones_unknown(cleaned, config)
     return _merge_adjacent_signal_runs(cleaned)
+
+
+def _mark_stuck_tones_unknown(runs: list[SignalRun], config: SignalConfig) -> list[SignalRun]:
+    max_mark_s = float(config.signal_max_continuous_mark_s)
+    if max_mark_s <= 0:
+        return runs
+    return [
+        SignalRun(SignalState.UNKNOWN, run.duration_s)
+        if run.state is SignalState.MARK and run.duration_s > max_mark_s
+        else run
+        for run in runs
+    ]
 
 
 def _min_plausible_mark_s(config: SignalConfig) -> float:
@@ -389,7 +341,15 @@ def _unknown_ratio_from_runs(runs: list[SignalRun]) -> float:
 
 
 def _has_keyed_cw_activity(energy: np.ndarray, config: SignalConfig) -> bool:
-    """Return true when the channel envelope has separable keyed activity."""
+    """Return true when the channel envelope looks like keyed CW.
+
+    Two checks are intentionally combined here.  The old standardized
+    low/high separation catches broad noise and flat tones, but it can be
+    fooled by a steady tone whose envelope has a tiny, very consistent ripple:
+    the normalized separation can look large even though there is no real
+    MARK/SPACE depth.  A CW channel must therefore have both separable clusters
+    and a minimum envelope contrast in dB.
+    """
 
     if len(energy) < 8:
         return True
@@ -397,15 +357,17 @@ def _has_keyed_cw_activity(energy: np.ndarray, config: SignalConfig) -> bool:
     if len(finite) < 8:
         return False
     separation = _keying_separation(finite)
-    return separation >= float(config.signal_min_keying_separation)
+    contrast_db = _keying_contrast_db(finite)
+    return (
+        separation >= float(config.signal_min_keying_separation)
+        and contrast_db >= float(config.signal_min_keying_contrast_db)
+    )
 
 
 def _keying_separation(energy: np.ndarray) -> float:
-    max_energy = float(np.max(energy)) if len(energy) else 0.0
-    if max_energy <= 0:
+    log_energy = _finite_log_energy(energy)
+    if len(log_energy) == 0:
         return 0.0
-    floor = max(max_energy * 1e-12, 1e-18)
-    log_energy = np.log(np.maximum(energy.astype(np.float64, copy=False), floor))
     p35, p65 = np.percentile(log_energy, [35, 65])
     low = log_energy[log_energy <= p35]
     high = log_energy[log_energy >= p65]
@@ -419,6 +381,35 @@ def _keying_separation(energy: np.ndarray) -> float:
         return 0.0
     pooled_sigma = max(((float(np.var(low)) + float(np.var(high))) / 2.0) ** 0.5, 1e-9)
     return float((float(np.mean(high)) - float(np.mean(low))) / pooled_sigma)
+
+
+def _keying_contrast_db(energy: np.ndarray) -> float:
+    """Robust on/off depth of the keyed envelope in dB.
+
+    This is deliberately not normalized by cluster variance.  A fixed tone with
+    small amplitude ripple can score well on normalized separation, but its
+    absolute p95-p5 depth stays small compared to real keyed CW.
+    """
+
+    log_energy = _finite_log_energy(energy)
+    if len(log_energy) == 0:
+        return 0.0
+    p5, p95 = np.percentile(log_energy, [5, 95])
+    return float((10.0 / np.log(10.0)) * max(0.0, float(p95 - p5)))
+
+
+def _finite_log_energy(energy: np.ndarray) -> np.ndarray:
+    if len(energy) == 0:
+        return np.asarray([], dtype=np.float64)
+    finite = energy[np.isfinite(energy)]
+    if len(finite) == 0:
+        return np.asarray([], dtype=np.float64)
+    max_energy = float(np.max(finite))
+    if max_energy <= 0:
+        return np.asarray([], dtype=np.float64)
+    floor = max(max_energy * 1e-12, 1e-18)
+    log_energy = np.log(np.maximum(finite.astype(np.float64, copy=False), floor))
+    return log_energy[np.isfinite(log_energy)]
 
 
 def _has_cw_scale_marks(mark_states: np.ndarray) -> bool:

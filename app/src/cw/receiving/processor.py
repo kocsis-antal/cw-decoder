@@ -36,6 +36,48 @@ class Receiver:
     def _window_start_s(self) -> float:
         return self._audio.start_s
 
+    def history_force_commit_before_s(self) -> float | None:
+        """Return the time floor that would satisfy max_history_s, if any.
+
+        This is intentionally advisory.  The receiver no longer cuts the global
+        audio ring blindly when this floor is crossed; the app first gets a
+        chance to force-stabilize current winner tokens up to a safe Morse
+        boundary and feed that boundary back through trim_channel_audio_before().
+        """
+
+        if self.config.max_history_s is None or self.config.max_history_s <= 0:
+            return None
+        overflow_s = self._audio.duration_s - float(self.config.max_history_s)
+        if overflow_s <= 0:
+            return None
+        return self._audio.start_s + overflow_s
+
+    def enforce_audio_history_limit(self) -> int:
+        """Trim global audio only up to a safe retained-channel boundary.
+
+        The max-history limit is a memory pressure signal, not permission to
+        cut into an active undecided Morse character.  If active channels still
+        need audio earlier than the desired max-history floor, this method trims
+        only as far as all active channels and the carrier detector can tolerate.
+        """
+
+        desired = self.history_force_commit_before_s()
+        if desired is None:
+            return 0
+        safe = self._global_safe_trim_before_s()
+        trim_before = min(float(desired), float(safe))
+        return self._audio.trim_before(trim_before)
+
+    def _global_safe_trim_before_s(self) -> float:
+        active_starts = [
+            self._channel_earliest_start_s(channel)
+            for channel in self._channel_tracker.channels
+            if channel.state is ChannelState.ACTIVE and channel.channel_started
+        ]
+        carrier_start = max(self._window_start_s, self.processed_duration_s - max(0.0, float(self.config.carrier_window_s)))
+        candidates = active_starts + [carrier_start]
+        return max(self._window_start_s, min(candidates))
+
     def push(self, block: AudioBlock) -> ReceiveChunk:
         if block.sample_rate != self.sample_rate:
             raise ValueError("audio block sample_rate changed during stream")
@@ -103,7 +145,7 @@ class Receiver:
 
     def _reported_channel_signal(self, channel: TrackedChannel) -> ChannelSignal:
         if channel.state is ChannelState.DORMANT and channel.channel_started:
-            signal, start_s = self._final_channel_window(channel)
+            signal, start_s = self._retained_channel_audio(channel)
             return ChannelSignal(
                 channel_id=channel.channel_id,
                 carrier_hz=channel.carrier_hz,
@@ -121,7 +163,7 @@ class Receiver:
 
         final_state = ChannelState.DORMANT if channel.channel_started else ChannelState.DROPPED
         if channel.state is ChannelState.ACTIVE and channel.channel_started:
-            signal, start_s = self._final_channel_window(channel)
+            signal, start_s = self._retained_channel_audio(channel)
         else:
             signal = np.asarray([], dtype=np.float32)
             start_s = self.processed_duration_s
@@ -138,7 +180,7 @@ class Receiver:
 
     def _channel_signal(self, channel: TrackedChannel) -> ChannelSignal:
         if channel.state is ChannelState.ACTIVE:
-            signal, start_s = self._channel_window(channel)
+            signal, start_s = self._retained_channel_audio(channel)
         else:
             signal = np.asarray([], dtype=np.float32)
             start_s = self.processed_duration_s
@@ -165,18 +207,14 @@ class Receiver:
             channel.first_seen_s - max(self.config.history_margin_s, self.config.carrier_window_s),
         )
 
-    def _channel_window(self, channel: TrackedChannel) -> tuple[np.ndarray, float]:
-        earliest_start_s = self._channel_earliest_start_s(channel)
-        latest_start_s = self.processed_duration_s - self.config.channel_window_s
-        start_s = max(earliest_start_s, latest_start_s)
-        return self._audio.from_time(start_s)
-
-    def _final_channel_window(self, channel: TrackedChannel) -> tuple[np.ndarray, float]:
-        # The live rolling window is intentionally bounded for CPU use, but a
-        # finish snapshot should flush the whole retained channel when possible.
-        # Otherwise an 8.3 s CQ with an 8.0 s channel window loses its first
-        # element and the final dormant decode can become worse than the last
-        # active line.
+    def _retained_channel_audio(self, channel: TrackedChannel) -> tuple[np.ndarray, float]:
+        # There is no independent per-channel rolling trim here.  The app-level
+        # stable-prefix split is the only safe source of channel audio trimming,
+        # because it can choose a Morse-token boundary and keep explicit context
+        # characters.  A blind time window can cut into a retained character
+        # (for example C -> N/K) and make the next decode worse than the
+        # previous one.  The only hard bound is the shared audio ring buffer
+        # size (max_history_s).
         return self._audio.from_time(self._channel_earliest_start_s(channel))
 
     def _stats(self) -> ReceivingStats:

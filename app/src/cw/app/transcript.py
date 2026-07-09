@@ -62,7 +62,13 @@ class TranscriptSplit:
 ChannelTranscript = TranscriptSplit
 
 
-def split_winner_tokens(channel: ChannelSignal, winner: ChannelWinner, config) -> tuple[ChannelWinner, float | None]:
+def split_winner_tokens(
+    channel: ChannelSignal,
+    winner: ChannelWinner,
+    config,
+    *,
+    force_trim_before_s: float | None = None,
+) -> tuple[ChannelWinner, float | None]:
     """Split the selected winner and return a display-ready winner plus trim time.
 
     The input winner carries tokens relative to the channel audio window.  The
@@ -76,6 +82,7 @@ def split_winner_tokens(channel: ChannelSignal, winner: ChannelWinner, config) -
         absolute,
         active=channel.state is ChannelState.ACTIVE,
         config=settings,
+        force_trim_before_s=force_trim_before_s,
     )
     return (
         replace(
@@ -93,6 +100,7 @@ def split_transcript_tokens(
     *,
     active: bool,
     config: TranscriptConfig,
+    force_trim_before_s: float | None = None,
 ) -> TranscriptSplit:
     """Split one current token sequence into stable and carried parts.
 
@@ -113,12 +121,31 @@ def split_transcript_tokens(
         fallback_after_chars=config.fallback_after_chars,
         commit_unresolved=config.commit_unresolved,
     )
-    stable = normalize_gap_tokens(normalized[:stable_len])
-    carried = normalize_gap_tokens(normalized[stable_len:])
+    stable_len = forced_stable_prefix_len(
+        normalized,
+        stable_len,
+        force_trim_before_s=force_trim_before_s,
+        audio_context_chars=config.audio_context_chars,
+    )
+    stable_prefix = normalize_gap_tokens(normalized[:stable_len])
+    trim_before_s = trim_time_from_stable_tokens(stable_prefix, config.audio_context_chars) if stable_prefix else None
+    if stable_prefix and force_trim_before_s is not None and (trim_before_s is None or trim_before_s < float(force_trim_before_s)):
+        emergency_trim = trim_time_from_stable_tokens(stable_prefix, 0)
+        if emergency_trim is not None:
+            trim_before_s = emergency_trim
+
+    # ``audio_context_chars`` means that the last stable content tokens remain
+    # in the receiver audio tail.  Those retained context tokens must not be
+    # emitted as stable/committed output yet, because the next audio window will
+    # decode them again.  Commit only the stable tokens that are strictly before
+    # the trim point; everything from the trim point onward is carried.
+    commit_len = committable_prefix_len(normalized, stable_len, trim_before_s)
+    stable = normalize_gap_tokens(normalized[:commit_len])
+    carried = normalize_gap_tokens(normalized[commit_len:])
     return TranscriptSplit(
         stable_tokens=stable,
         carried_tokens=carried,
-        trim_before_s=trim_time_from_stable_tokens(stable, config.audio_context_chars) if stable else None,
+        trim_before_s=trim_before_s,
     )
 
 
@@ -167,6 +194,89 @@ def stable_prefix_len(
 
 # Kept under the old name because the tests and the concept still use the same
 # safe-boundary rule; the surrounding transcript object has been removed.
+def forced_stable_prefix_len(
+    tokens: tuple[DecodeToken, ...],
+    current_len: int,
+    *,
+    force_trim_before_s: float | None,
+    audio_context_chars: int,
+) -> int:
+    """Raise the stable prefix when history pressure needs a safe trim.
+
+    This is an emergency policy for ``max_history_s``.  It never chooses an
+    arbitrary audio cut; it only promotes the current selected token sequence to
+    stable at token boundaries until ``trim_time_from_stable_tokens()`` can
+    reach the requested floor.  If no token boundary can satisfy the floor, the
+    largest available token prefix is returned and receiving will retain extra
+    audio rather than cut blindly.
+    """
+
+    if force_trim_before_s is None or not tokens:
+        return max(0, min(int(current_len), len(tokens)))
+
+    start_len = max(0, min(int(current_len), len(tokens)))
+    target = float(force_trim_before_s)
+
+    def trim_at(length: int, context_chars: int) -> float | None:
+        stable = normalize_gap_tokens(tokens[:length])
+        return trim_time_from_stable_tokens(stable, context_chars) if stable else None
+
+    for length in range(start_len, len(tokens) + 1):
+        trim = trim_at(length, audio_context_chars)
+        if trim is not None and trim >= target:
+            return length
+
+    # If the normal context-retention rule keeps too much old audio, sacrifice
+    # context before sacrificing character boundaries.  This branch is rare and
+    # exists only to make the global history limit an emergency commit rather
+    # than a character cutter.
+    if audio_context_chars > 0:
+        for length in range(start_len, len(tokens) + 1):
+            trim = trim_at(length, 0)
+            if trim is not None and trim >= target:
+                return length
+
+    return len(tokens)
+
+
+
+def committable_prefix_len(
+    tokens: tuple[DecodeToken, ...],
+    stable_len: int,
+    trim_before_s: float | None,
+    *,
+    tolerance_s: float = 1e-6,
+) -> int:
+    """Return the stable prefix that is not retained as audio context.
+
+    ``stable_len`` is the prefix that may be trusted by the current selection.
+    ``trim_before_s`` is the absolute receiver trim point.  Tokens at or after
+    that point are kept in audio context and therefore stay carried/tentative in
+    public output; otherwise a later window could commit the same physical
+    characters again with a different temporary gap decision.
+    """
+
+    max_len = max(0, min(int(stable_len), len(tokens)))
+    if max_len <= 0:
+        return 0
+    if trim_before_s is None:
+        return max_len
+
+    floor = float(trim_before_s) + float(tolerance_s)
+    commit_len = 0
+    for index, token in enumerate(tokens[:max_len]):
+        token_time = _token_end_time_s(token)
+        if token_time is None:
+            # Timeless tokens cannot be proven to be retained context.  Keep the
+            # old stable behavior for such synthetic/test tokens.
+            commit_len = index + 1
+            continue
+        if token_time <= floor:
+            commit_len = index + 1
+            continue
+        break
+    return commit_len
+
 def safe_commit_prefix_len(
     tokens: tuple[DecodeToken, ...],
     max_len: int,
@@ -208,19 +318,19 @@ def resolved_prefix_len(tokens: tuple[DecodeToken, ...], max_len: int) -> int:
 
 
 def trim_time_from_stable_tokens(tokens: tuple[DecodeToken, ...], audio_context_chars: int) -> float | None:
-    last_session_gap_end = _last_session_gap_time_s(tokens)
-    if tokens and tokens[-1].kind == "session_gap":
-        return last_session_gap_end
+    last_gap_end = _last_gap_time_s(tokens)
+    if tokens and tokens[-1].kind in GAP_KINDS:
+        return last_gap_end
 
     timed_content = [
         token
         for token in tokens
         if token.is_content
         and (token.start_s is not None or token.end_s is not None)
-        and (last_session_gap_end is None or _token_time_s(token) is None or _token_time_s(token) >= last_session_gap_end)
+        and (last_gap_end is None or _token_time_s(token) is None or _token_time_s(token) >= last_gap_end)
     ]
     if not timed_content:
-        return last_session_gap_end
+        return last_gap_end
 
     context_chars = max(0, int(audio_context_chars))
     if context_chars <= 0:
@@ -229,8 +339,8 @@ def trim_time_from_stable_tokens(tokens: tuple[DecodeToken, ...], audio_context_
         keep_index = max(0, len(timed_content) - context_chars)
         keep_token = timed_content[keep_index]
         trim = keep_token.start_s if keep_token.start_s is not None else keep_token.end_s
-    if last_session_gap_end is not None and trim is not None:
-        return max(float(last_session_gap_end), float(trim))
+    if last_gap_end is not None and trim is not None:
+        return max(float(last_gap_end), float(trim))
     return trim
 
 
@@ -249,10 +359,29 @@ def _last_session_gap_time_s(tokens: tuple[DecodeToken, ...]) -> float | None:
     return None
 
 
+def _last_gap_time_s(tokens: tuple[DecodeToken, ...]) -> float | None:
+    for token in reversed(tokens):
+        if token.kind not in GAP_KINDS:
+            continue
+        if token.end_s is not None:
+            return token.end_s
+        if token.start_s is not None:
+            return token.start_s
+    return None
+
+
 def _token_time_s(token: DecodeToken) -> float | None:
     if token.start_s is not None:
         return token.start_s
     return token.end_s
+
+
+def _token_end_time_s(token: DecodeToken) -> float | None:
+    if token.end_s is not None:
+        return float(token.end_s)
+    if token.start_s is not None:
+        return float(token.start_s)
+    return None
 
 
 def normalize_gap_tokens(tokens: tuple[DecodeToken, ...]) -> tuple[DecodeToken, ...]:
@@ -297,4 +426,5 @@ __all__ = [
     "stable_prefix_len",
     "trim_time_from_committed_tokens",
     "trim_time_from_stable_tokens",
+    "committable_prefix_len",
 ]

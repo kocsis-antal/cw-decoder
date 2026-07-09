@@ -15,9 +15,8 @@ class SelectionGroupDebug:
     text: str
     unresolved_tokens: int
     support_count: int
-    family_count: int
     neighbor_stability: int
-    family_support_score: float = 0.0
+    support_score: float = 0.0
     unknown_penalty_score: float = 0.0
     final_score: float = 0.0
     selected: bool = False
@@ -32,7 +31,7 @@ class ChannelSelectionDebug:
     channel_id: int
     selected_text: str = ""
     kept_previous: bool = False
-    available_family_count: int = 0
+    available_track_count: int = 0
     groups: tuple[SelectionGroupDebug, ...] = ()
 
 
