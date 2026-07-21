@@ -1,7 +1,7 @@
 [project]
 name = "cw-morse-layered-pipeline"
 version = "0.1.0"
-description = "Experimental CW Morse signal generator and decoder."
+description = "Layered real-time CW/Morse streaming receiver and decoder."
 requires-python = ">=3.12"
 
 [tool.pytest.ini_options]

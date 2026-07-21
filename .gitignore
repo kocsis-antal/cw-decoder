@@ -1,4 +1,19 @@
+# Python
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local live captures and generated debug/output files
+# The application creates the directory automatically when --capture-raw is used.
+app/samples/live/
+
+# Common locally generated outputs
+channels.jsonl
+debug.jsonl
