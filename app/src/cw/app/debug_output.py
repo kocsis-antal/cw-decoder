@@ -16,6 +16,7 @@ class DebugDecodedText:
     text: str
     unresolved_tokens: int
     tokens: tuple[DecodeToken, ...] = ()
+    timing_quality: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -78,7 +79,7 @@ def channel_debug_output_to_dict(output: ChannelDebugOutput) -> dict[str, Any]:
                     {
                         "decoder": decoder.decoder,
                         "answers": [
-                            {"text": answer.text, "tokens": tokens_to_dicts(answer.tokens), "unresolved_tokens": answer.unresolved_tokens}
+                            {"text": answer.text, "tokens": tokens_to_dicts(answer.tokens), "unresolved_tokens": answer.unresolved_tokens, "timing_quality": _rounded_float(answer.timing_quality)}
                             for answer in decoder.answers
                         ],
                     }
@@ -98,6 +99,7 @@ def channel_debug_output_to_dict(output: ChannelDebugOutput) -> dict[str, Any]:
                     "text": group.text,
                     "unresolved_tokens": group.unresolved_tokens,
                     "support_count": group.support_count,
+                    "timing_quality": _rounded_float(group.timing_quality),
                     "support_score": _rounded_float(group.support_score),
                     "unknown_penalty_score": _rounded_float(group.unknown_penalty_score),
                     "final_score": _rounded_float(group.final_score),
@@ -111,6 +113,7 @@ def channel_debug_output_to_dict(output: ChannelDebugOutput) -> dict[str, Any]:
                             "analyzer": path.analyzer,
                             "decoder": path.decoder,
                             "unresolved_tokens": path.unresolved_tokens,
+                            "timing_quality": _rounded_float(path.timing_quality),
                         }
                         for path in group.paths
                     ],
@@ -138,7 +141,7 @@ def _debug_signal(track: SignalTrack, results: tuple[DecodeResult, ...]) -> Debu
             DebugDecoderOutput(
                 decoder=result.decoder,
                 answers=tuple(
-                    DebugDecodedText(text=answer.text, tokens=answer.tokens, unresolved_tokens=max(0, int(answer.unresolved_tokens)))
+                    DebugDecodedText(text=answer.text, tokens=answer.tokens, unresolved_tokens=max(0, int(answer.unresolved_tokens)), timing_quality=max(0.0, float(answer.timing_quality)))
                     for answer in result.answers
                 ),
             )

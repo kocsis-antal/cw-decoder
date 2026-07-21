@@ -385,23 +385,22 @@ def unit_candidates(unit_s: float, spread: float, steps: int) -> list[float]:
     return sorted(set(candidates))
 
 
-def timing_quality_score(decoded: TimedDecode, *, punctuation_penalty: float = 0.0) -> float:
+def timing_quality_score(decoded: TimedDecode) -> float:
+    """Measure only the physical Morse timing fit. Lower is better.
+
+    Unresolved-token count, text length and character content deliberately do
+    not belong here. Those are visible to selection independently.
+    """
+
     tones = [run for run in decoded.classified_runs if run.kind is HardRunKind.TONE]
     gaps = [run for run in decoded.classified_runs if run.kind is HardRunKind.GAP]
     dots = [run for run in tones if run.symbol == "."]
     dashes = [run for run in tones if run.symbol == "-"]
-    unresolved_tokens = decoded.unresolved_tokens
-    token_count = len([token for token in decoded.tokens if token != "/"])
-    punctuation_count = sum(1 for char in decoded.text if char and not char.isspace() and not char.isalnum())
 
     return (
-        _unresolved_token_penalty(unresolved_tokens, token_count)
-        + _invalid_token_penalty(decoded.tokens)
-        + _too_few_tokens_penalty(token_count)
-        + _tone_ratio_error(dots, dashes) * 120.0
+        _tone_ratio_error(dots, dashes) * 120.0
         + _gap_min_error(gaps) * 80.0
         + _unit_cv(dots) * 60.0
-        + punctuation_count * punctuation_penalty
     )
 
 
@@ -700,12 +699,6 @@ def _best_letter_word_gap_split(gaps: list[float], config, *, min_upper_count: i
     return best_index
 
 
-def _unresolved_token_penalty(unresolved_count: int, token_count: int) -> float:
-    if unresolved_count <= 0:
-        return 0.0
-    return 240.0 * unresolved_count / max(token_count, 1)
-
-
 def _tone_ratio_error(dots: list[ClassifiedRun], dashes: list[ClassifiedRun]) -> float:
     if not dots or not dashes:
         return 0.0
@@ -739,18 +732,6 @@ def _unit_cv(dots: list[ClassifiedRun]) -> float:
         return 10.0
     variance = sum((duration - mean) ** 2 for duration in durations) / len(durations)
     return variance**0.5 / mean
-
-
-def _invalid_token_penalty(tokens: tuple[str, ...]) -> float:
-    return sum(80.0 for token in tokens if token and token != "/" and len(token) > 6)
-
-
-def _too_few_tokens_penalty(token_count: int) -> float:
-    if token_count == 0:
-        return 1000.0
-    if token_count == 1:
-        return 100.0
-    return 0.0
 
 
 def _below_min_error(value: float, minimum: float) -> float:

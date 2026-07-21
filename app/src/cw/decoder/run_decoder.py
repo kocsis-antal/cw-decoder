@@ -82,7 +82,7 @@ def _decode_whole_runs(hard_runs: list, config: DecoderConfig) -> list[_DecodedP
                 _DecodedPath(
                     text=decoded.text,
                     unresolved_tokens=decoded.unresolved_tokens,
-                    timing_quality=round(float(timing_quality_score(decoded, punctuation_penalty=config.punctuation_penalty)), 6),
+                    timing_quality=round(float(timing_quality_score(decoded)), 6),
                     unit_s=round(float(unit_s), 6),
                     tokens=decoded.decode_tokens,
                 )
@@ -91,7 +91,15 @@ def _decode_whole_runs(hard_runs: list, config: DecoderConfig) -> list[_DecodedP
 
 
 def _to_public_answers(answers: list[_DecodedPath]) -> list[DecodedText]:
-    return [DecodedText(text=answer.text, unresolved_tokens=answer.unresolved_tokens, tokens=answer.tokens) for answer in answers]
+    return [
+        DecodedText(
+            text=answer.text,
+            unresolved_tokens=answer.unresolved_tokens,
+            tokens=answer.tokens,
+            timing_quality=answer.timing_quality,
+        )
+        for answer in answers
+    ]
 
 
 def _unique_best_text_answers(answers: list[_DecodedPath]) -> list[_DecodedPath]:
@@ -106,11 +114,10 @@ def _unique_best_text_answers(answers: list[_DecodedPath]) -> list[_DecodedPath]
     return list(best_by_text.values())
 
 
-def _answer_sort_key(answer: _DecodedPath) -> tuple[int, float, float]:
-    return (
-        answer.unresolved_tokens,
-        answer.timing_quality,
-    )
+def _answer_sort_key(answer: _DecodedPath) -> tuple[float]:
+    # Decoder-local ordering is timing-only. Selection must never infer quality
+    # from the answer's list position/rank.
+    return (answer.timing_quality,)
 
 
 __all__ = ["RunDecoder"]

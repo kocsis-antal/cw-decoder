@@ -11,15 +11,16 @@ from cw.decoder.tokens import DecodeToken
 class DecodedText:
     """One text returned by a decoder.
 
-    This is not a score and not a ranking.  The only decoder-owned quality fact
-    exposed here is how many Morse tokens could not be mapped to a valid
-    character.  Invalid tokens are visible in text with the decode error marker;
-    a literal '?' remains a valid Morse character.
+    This is not a ranking. ``timing_quality`` is the decoder-owned physical
+    timing-fit value; lower is better. ``unresolved_tokens`` is descriptive
+    output only and must not be used as a hidden decoder rank. Selection owns
+    the comparison between candidates.
     """
 
     text: str
     unresolved_tokens: int = 0
     tokens: tuple[DecodeToken, ...] = ()
+    timing_quality: float = 0.0
 
 
 @dataclass(frozen=True)

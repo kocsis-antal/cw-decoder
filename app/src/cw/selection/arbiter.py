@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from math import isfinite
 
-from cw.decoder.tokens import DecodeToken, token_signature
+from cw.decoder.tokens import DecodeToken, TOKEN_UNKNOWN, token_signature
+from cw.morse_table import DECODE_ERROR_MARKER
 from cw.selection.config import SelectionConfig
 from cw.selection.debug import (
     ChannelSelectionDebug,
@@ -18,12 +19,11 @@ from cw.selection.models import ChannelDecodedTexts, ChannelWinner, SelectionChu
 class _DecodedPath:
     text: str
     tokens: tuple[DecodeToken, ...]
-    unresolved_tokens: int
+    timing_quality: float
     analyzer: str
     decoder: str
     encounter_order: int
     unknown_ratio: float = 0.0
-    answer_rank: int = 0
 
 
 @dataclass(frozen=True)
@@ -47,21 +47,22 @@ class _GroupScore:
     unresolved_tokens: int
     support_count: int
     support_score: float
+    timing_quality: float
     unknown_penalty_score: float
     final_score: float
     neighbor_stability: int
     encounter_order: int
 
-    def ranking_tuple(self) -> tuple[float, int, int, int]:
-        """Higher is better, except unresolved tokens which is negated.
+    def ranking_tuple(self) -> tuple[float, float, int, int]:
+        """Rank independent facts once.
 
-        With a single activity model in the normal runtime path, selection
-        rewards agreement between its probability variants directly.
+        ``final_score`` already contains the selection-owned UNKNOWN penalty.
+        Timing quality is a separate decoder-owned physical tie-break.
         """
 
         return (
             self.final_score,
-            -self.unresolved_tokens,
+            -self.timing_quality,
             self.neighbor_stability,
             self.support_count,
         )
@@ -182,7 +183,7 @@ def _groups_by_text(channel: ChannelDecodedTexts) -> dict[tuple[tuple[str, str],
     encounter_order = 0
     for track in channel.tracks:
         for result in track.results:
-            for answer_rank, answer in enumerate(result.answers):
+            for answer in result.answers:
                 text = answer.text.strip()
                 if not text:
                     continue
@@ -196,12 +197,11 @@ def _groups_by_text(channel: ChannelDecodedTexts) -> dict[tuple[tuple[str, str],
                     _DecodedPath(
                         text=text,
                         tokens=tokens,
-                        unresolved_tokens=max(0, int(answer.unresolved_tokens)),
+                        timing_quality=_normalized_timing_quality(answer.timing_quality),
                         analyzer=track.analyzer,
                         decoder=result.decoder,
                         encounter_order=encounter_order,
                         unknown_ratio=max(0.0, float(track.unknown_ratio)),
-                        answer_rank=answer_rank,
                     )
                 )
                 encounter_order += 1
@@ -209,18 +209,19 @@ def _groups_by_text(channel: ChannelDecodedTexts) -> dict[tuple[tuple[str, str],
 
 
 def _score_group(group: _TextGroup, analyzer_infos: dict[str, _AnalyzerInfo], config: SelectionConfig) -> _ScoredGroup:
-    paths = tuple(group.paths)
-    best_paths = _best_paths_by_unresolved(paths)
-    min_unresolved = min(path.unresolved_tokens for path in best_paths)
-    support_count = len({path.analyzer for path in best_paths})
-    support_score = sum(_answer_rank_weight(path.answer_rank) for path in best_paths)
-    unknown_penalty_score = _unknown_penalty(min_unresolved)
+    best_paths = _best_paths_by_analyzer(tuple(group.paths))
+    unresolved_tokens = _unresolved_token_count(group.tokens, group.text)
+    support_count = len(best_paths)
+    support_score = float(support_count)
+    timing_quality = _mean_timing_quality(best_paths)
+    unknown_penalty_score = _unknown_penalty(unresolved_tokens)
     final_score = support_score - unknown_penalty_score
     neighbor_stability = _neighbor_stability(list(best_paths), analyzer_infos)
     score = _GroupScore(
-        unresolved_tokens=min_unresolved,
+        unresolved_tokens=unresolved_tokens,
         support_count=support_count,
         support_score=support_score,
+        timing_quality=timing_quality,
         unknown_penalty_score=unknown_penalty_score,
         final_score=final_score,
         neighbor_stability=neighbor_stability,
@@ -237,16 +238,34 @@ def _score_group(group: _TextGroup, analyzer_infos: dict[str, _AnalyzerInfo], co
     )
 
 
-def _best_paths_by_unresolved(paths: tuple[_DecodedPath, ...]) -> tuple[_DecodedPath, ...]:
-    min_unresolved = min(path.unresolved_tokens for path in paths)
-    return tuple(path for path in paths if path.unresolved_tokens == min_unresolved)
+def _best_paths_by_analyzer(paths: tuple[_DecodedPath, ...]) -> tuple[_DecodedPath, ...]:
+    best: dict[str, _DecodedPath] = {}
+    for path in paths:
+        current = best.get(path.analyzer)
+        if current is None or (path.timing_quality, path.encounter_order) < (
+            current.timing_quality,
+            current.encounter_order,
+        ):
+            best[path.analyzer] = path
+    return tuple(best.values())
 
 
-def _answer_rank_weight(answer_rank: int) -> float:
-    # Decoder answers are already sorted by timing quality.  A lower-ranked
-    # alternative is useful as weak support, but it must not beat a top answer
-    # merely because it appears as a fallback under several probability variants.
-    return 1.0 / float(max(1, int(answer_rank) + 1))
+def _unresolved_token_count(tokens: tuple[DecodeToken, ...], text: str) -> int:
+    # Tokens are the source of truth in the runtime. The text fallback keeps
+    # hand-built/test candidates honest without trusting decoder-owned ranking data.
+    token_count = sum(1 for token in tokens if token.kind == TOKEN_UNKNOWN)
+    return max(token_count, text.count(DECODE_ERROR_MARKER))
+
+
+def _normalized_timing_quality(value: float) -> float:
+    quality = float(value)
+    return quality if isfinite(quality) and quality >= 0.0 else float("inf")
+
+
+def _mean_timing_quality(paths: tuple[_DecodedPath, ...]) -> float:
+    if not paths:
+        return float("inf")
+    return sum(path.timing_quality for path in paths) / len(paths)
 
 
 def _unknown_penalty(unresolved_tokens: int) -> float:
@@ -291,6 +310,7 @@ def _selection_debug(
             text=group.text,
             unresolved_tokens=group.score.unresolved_tokens,
             support_count=group.score.support_count,
+            timing_quality=group.score.timing_quality,
             support_score=group.score.support_score,
             unknown_penalty_score=group.score.unknown_penalty_score,
             final_score=group.score.final_score,
@@ -303,7 +323,8 @@ def _selection_debug(
                 SelectionPathDebug(
                     analyzer=path.analyzer,
                     decoder=path.decoder,
-                    unresolved_tokens=path.unresolved_tokens,
+                    unresolved_tokens=group.score.unresolved_tokens,
+                    timing_quality=path.timing_quality,
                 )
                 for path in group.best_paths
             ),

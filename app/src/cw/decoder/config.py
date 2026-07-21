@@ -38,7 +38,6 @@ class DecoderConfig:
     min_gap_boundary_separation_units: float = 0.55
     unit_candidate_spread: float = 0.0
     unit_candidate_steps: int = 1
-    punctuation_penalty: float = 0.0
 
 
 def validate_decoder_config(config: DecoderConfig) -> None:
@@ -78,8 +77,6 @@ def validate_decoder_config(config: DecoderConfig) -> None:
         raise ValueError("unit_candidate_spread must not be negative")
     if config.unit_candidate_steps < 1:
         raise ValueError("unit_candidate_steps must be positive")
-    if config.punctuation_penalty < 0:
-        raise ValueError("punctuation_penalty must not be negative")
 
 
 __all__ = ["DecoderConfig", "validate_decoder_config"]

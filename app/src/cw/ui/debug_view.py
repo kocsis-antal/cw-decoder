@@ -60,6 +60,7 @@ def _format_channel_debug(payload: dict) -> list[str]:
                 f"   {marker} {_quote(str(group.get('text') or ''))} "
                 f"bad={int(group.get('unresolved_tokens') or 0)} "
                 f"support={int(group.get('support_count') or 0)} "
+                f"timing={float(group.get('timing_quality') or 0.0):.2f} "
                 f"neighbors={int(group.get('neighbor_stability') or 0)} "
                 f"score={float(group.get('final_score') or 0.0):.2f} "
                 f"penalty={float(group.get('unknown_penalty_score') or 0.0):.2f}{kept}{rejected}"
@@ -76,7 +77,7 @@ def _format_signal(signal: dict) -> list[str]:
     for decoder in signal.get("decoders") or []:
         answers = decoder.get("answers") or []
         rendered_answers = ", ".join(
-            f"{_quote(str(answer.get('text') or ''))}/bad={int(answer.get('unresolved_tokens') or 0)}"
+            f"{_quote(str(answer.get('text') or ''))}/bad={int(answer.get('unresolved_tokens') or 0)}/timing={float(answer.get('timing_quality') or 0.0):.2f}"
             for answer in answers
         )
         lines.append(f"      {decoder.get('decoder') or ''}: {rendered_answers or '-'}")

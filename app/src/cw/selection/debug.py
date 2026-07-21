@@ -7,7 +7,8 @@ from dataclasses import dataclass
 class SelectionPathDebug:
     analyzer: str
     decoder: str
-    unresolved_tokens: int
+    unresolved_tokens: int = 0
+    timing_quality: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -16,6 +17,7 @@ class SelectionGroupDebug:
     unresolved_tokens: int
     support_count: int
     neighbor_stability: int
+    timing_quality: float = 0.0
     support_score: float = 0.0
     unknown_penalty_score: float = 0.0
     final_score: float = 0.0

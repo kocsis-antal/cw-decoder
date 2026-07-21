@@ -478,7 +478,11 @@ A decoder nem ismeri:
 - a receiving állapotát;
 - a selection döntéseit.
 
-Az `UNKNOWN` futam nem automatikusan SPACE és nem is automatikusan MARK: a dekóder helyileg vizsgálja a lehetséges értelmezéseket.
+Egy **futam** egy megszakítás nélküli, azonos állapotú időszakasz (például 80 ms MARK vagy 40 ms UNKNOWN).
+
+Minden egyes `UNKNOWN` futam **külön-külön ágazik** MARK és SPACE irányba. Ez nem globális „minden UNKNOWN legyen MARK” / „minden UNKNOWN legyen SPACE” próbálkozás: N darab UNKNOWN legfeljebb 2^N konkrét értelmezési ágat ad. Az UNKNOWN időtartama nem változik; az adott ágban csak MARK-ként vagy SPACE-ként értelmezzük.
+
+Minden konkrét UNKNOWN→MARK/SPACE ághoz a decoder újra megbecsüli az adott futamsorhoz illő Morse alapidőt (`unit_s`). A decoder a jelöltekhez tisztán időzítés-alapú `timing_quality` értéket ad; a jelöltek közötti tényleges rangsorolás a selection feladata.
 
 A nem feloldható Morse token megjelenítése:
 
@@ -503,9 +507,11 @@ A selection szándékosan tartalomfüggetlen. Nem használ:
 A jelenlegi kiválasztás fő információi:
 
 - hány signal-paraméterváltozat támogatja ugyanazt az eredményt;
-- hány feloldatlan token maradt;
-- a dekóder alternatíváin belüli rang;
+- hány `unknown` token maradt — ezt a selection maga állapítja meg a tokenekből;
+- a decoder által mért, tisztán időzítés-alapú `timing_quality`;
 - szomszédos signal-paraméterek stabilitása.
+
+A decoder válaszainak listapozíciója nem selection-bemenet: nincs `answer_rank` alapú részpontszám.
 
 A selection stateless: nem ő tárolja a korábbi szöveget.
 

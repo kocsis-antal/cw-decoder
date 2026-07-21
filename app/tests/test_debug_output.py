@@ -121,4 +121,4 @@ def test_debug_view_formats_selection_reason() -> None:
 
     assert rendered[0].startswith("DEBUG t=1.25s ch4 702.0Hz active selected=\"CQ\"")
     assert any("energy_distribution:p=0.80" in item for item in rendered)
-    assert any('bad=0 support=3 neighbors=1' in item for item in rendered)
+    assert any('bad=0 support=3 timing=0.00 neighbors=1' in item for item in rendered)

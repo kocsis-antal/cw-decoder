@@ -14,7 +14,7 @@ def test_decode_result_contains_only_decoder_answers_without_ranking_fields() ->
     answer_fields = {field.name for field in fields(DecodedText)}
 
     assert result_fields == {"decoder", "answers"}
-    assert answer_fields == {"text", "unresolved_tokens", "tokens"}
+    assert answer_fields == {"text", "unresolved_tokens", "tokens", "timing_quality"}
     assert "channel_id" not in result_fields
     assert "carrier_hz" not in result_fields
     assert "score" not in answer_fields
@@ -105,6 +105,8 @@ def test_decoder_answer_order_does_not_use_text_as_tiebreaker() -> None:
     source = inspect.getsource(run_decoder._answer_sort_key)
 
     assert "answer.text" not in source
+    assert "answer.unresolved_tokens" not in source
+    assert "answer.timing_quality" in source
 
 
 def test_decoder_refuses_tracks_that_would_expand_too_many_unknown_branches() -> None:
